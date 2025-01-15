@@ -1,0 +1,7 @@
+com\fwe\flyingwhiteelephant\service\NodeServiceUtils.class
+com\fwe\flyingwhiteelephant\service\consent\raft\protocol\Raft$LogEntry.class
+com\fwe\flyingwhiteelephant\service\consent\raft\LogEntry$LogEntryBuilder.class
+com\fwe\flyingwhiteelephant\service\NodeClient.class
+com\fwe\flyingwhiteelephant\service\consent\raft\protocol\Raft$LogEntry$Builder.class
+com\fwe\flyingwhiteelephant\service\consent\raft\protocol\Raft$LogEntry$1.class
+com\fwe\flyingwhiteelephant\service\consent\raft\protocol\Raft$LogEntryOrBuilder.class

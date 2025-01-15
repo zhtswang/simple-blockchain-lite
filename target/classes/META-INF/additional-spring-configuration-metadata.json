@@ -1,0 +1,53 @@
+{
+  "properties": [
+    {
+      "name": "nodes",
+      "type": "java.lang.String",
+      "description": "Description for nodes."
+    },
+    {
+      "name": "nodes[0].id",
+      "type": "java.lang.String",
+      "description": "Description for nodes[0].id."
+    },
+    {
+      "name": "nodes[0].endpoint.uri",
+      "type": "java.lang.String",
+      "description": "Description for nodes[0].endpoint.uri."
+    },
+    {
+      "name": "nodes[1].id",
+      "type": "java.lang.String",
+      "description": "Description for nodes[1].id."
+    },
+    {
+      "name": "nodes[1].endpoint.uri",
+      "type": "java.lang.String",
+      "description": "Description for nodes[1].endpoint.uri."
+    },
+    {
+      "name": "blockchain.nodes",
+      "type": "java.lang.String",
+      "description": "Description for blockchain.nodes."
+    },
+    {
+      "name": "blockchain.nodes[0].endpoint.uri",
+      "type": "java.lang.String",
+      "description": "Description for blockchain.nodes[0].endpoint.uri."
+    },
+    {
+      "name": "blockchain.nodes[0].id",
+      "type": "java.lang.String",
+      "description": "Description for blockchain.nodes[0].id."
+    },
+    {
+      "name": "blockchain.nodes[1].endpoint.uri",
+      "type": "java.lang.String",
+      "description": "Description for blockchain.nodes[1].endpoint.uri."
+    },
+    {
+      "name": "blockchain.nodes[1].id",
+      "type": "java.lang.String",
+      "description": "Description for blockchain.nodes[1].id."
+    }
+  ] }

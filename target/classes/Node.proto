@@ -1,0 +1,84 @@
+//generate one proto file for node server, provide block streams and block info to client
+syntax = "proto3";
+
+option java_package = "com.fwe.flyingwhiteelephant.service.rpc.node";
+option java_outer_classname = "NodeRPC";
+
+service BlockService {
+  rpc handleGetBlockStream(BlockRequest) returns (stream BlockResponse) {}
+  rpc handleGetLatestBlockHeight(BlockHeightRequest) returns (BlockHeight) {}
+  rpc handleConsentRequest(Block) returns (DeliverStatus) {}
+  rpc handleDeliverBlock(Block) returns (DeliverStatus) {}
+  rpc handleTransactions(BatchTransaction) returns (CommonResponse) {}
+}
+
+message BatchTransaction {
+  repeated Transaction transactions = 1;
+}
+
+message CommonResponse {
+  uint32 code = 1;
+  string description = 2;
+}
+
+message DeliverStatus {
+  uint32 code = 1;
+  string description = 2;
+}
+
+message BlockHeightRequest {
+  int64  nodeId = 1;
+}
+
+message BlockHeight {
+  int64 height = 1;
+}
+
+message BlockRequest {
+  int64 startBlockNumber = 1;
+  int64 endBlockNumber = 2;
+}
+
+message Header {
+  int64 height = 1;
+  string parentHash = 2;
+  string hash = 3;
+  string channelId = 4;
+  int64 timestamp = 5;
+  string transactionsRoot = 6;
+}
+
+message TransactionHeader {
+  string txid = 1;
+  string creator = 2;
+  string version = 3;
+  string type = 4;
+  string status = 5;
+  string signature = 6;
+  int64 timestamp = 7;
+}
+
+message TransactionPayload {
+  string smartContract = 1;
+  repeated string args = 2;
+  map<string, string> writeSet = 3;
+}
+
+message Transaction {
+  TransactionHeader header = 1;
+  TransactionPayload payload = 2;
+}
+
+message Block {
+  Header header = 1;
+  repeated Transaction transactions = 2;
+  string signature = 3;
+  string signer = 4;
+}
+
+message BlockResponse {
+  // List of blocks
+  repeated Block blocks = 1;
+}
+
+

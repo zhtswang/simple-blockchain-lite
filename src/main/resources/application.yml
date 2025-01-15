@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: FlyingWhiteElephant
+server:
+    port: 8080
+node:
+  id: 1
+blockchain:
+  block_size: 10
+  block timeout: 500
+  chain_id: fwe
+  chain_path: /fwe/
+  peers:
+    algorithm: raft
+    nodes:
+      - endpoint:
+          uri: http://localhost:8080
+        tls: true
+        plugin-server-cert-chain-path: /fwe/1/keys/plugin_server_cert.crt
+        plugin-server-private-key-path: /fwe/1/keys/plugin_server_private.key
+        plugin-client-cert-chain-path: /fwe/1/keys/plugin_server_cert.crt
+        plugin-client-private-key-path: /fwe/1/keys/plugin_server_private.key
+        id: 1
+      - endpoint:
+          uri: http://localhost:8081
+        tls: true
+        plugin-server-cert-chain-path: /fwe/2/keys/plugin_server_cert.crt
+        plugin-server-private-key-path: /fwe/2/keys/plugin_server_private.key
+        plugin-client-cert-chain-path: /fwe/2/keys/plugin_server_cert.crt
+        plugin-client-private-key-path: /fwe/2/keys/plugin_server_private.key
+        id: 2
+      - endpoint:
+          uri: http://localhost:8082
+        tls: true
+        plugin-server-cert-chain-path: /fwe/3/keys/plugin_server_cert.crt
+        plugin-server-private-key-path: /fwe/3/keys/plugin_server_private.key
+        plugin-client-cert-chain-path: /fwe/3/keys/plugin_server_cert.crt
+        plugin-client-private-key-path: /fwe/3/keys/plugin_server_private.key
+        id: 3
+logging:
+  level:
+    root: info
