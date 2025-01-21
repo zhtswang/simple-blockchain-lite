@@ -29,6 +29,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static java.util.Comparator.comparing;
+
 @Slf4j
 @Component
 public class Blockchain {
@@ -182,6 +184,7 @@ public class Blockchain {
 
     public List<Transaction> orderTransactions(List<Transaction> transactions) {
         // Order the transactions
+        transactions.sort(comparing(o -> o.getHeader().getTimestamp()));
         return transactions;
     }
 

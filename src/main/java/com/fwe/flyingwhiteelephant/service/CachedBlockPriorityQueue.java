@@ -3,12 +3,14 @@ package com.fwe.flyingwhiteelephant.service;
 import com.fwe.flyingwhiteelephant.model.Block;
 
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 public class CachedBlockPriorityQueue {
     private final PriorityBlockingQueue<Block> cachedBlockPriorityQueue;
     private final CopyOnWriteArrayList<Consumer<Block>> listeners;
     private final ExecutorService consumerExecutorService = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean consumerIsRunning = new AtomicBoolean(false);
     public CachedBlockPriorityQueue() {
         this.cachedBlockPriorityQueue =  new PriorityBlockingQueue<>(100,
                 (o1, o2) -> (int) (o1.getHeader().getHeight() - o2.getHeader().getHeight()));
@@ -31,9 +33,10 @@ public class CachedBlockPriorityQueue {
     private void notifyListeners() {
         for (Consumer<Block> listener : listeners) {
             consumerExecutorService.submit(() -> {
-                while(!cachedBlockPriorityQueue.isEmpty()) {
+                while(!cachedBlockPriorityQueue.isEmpty() && consumerIsRunning.compareAndSet(false, true)) {
                     Block item = peek();
                     listener.accept(item);
+                    consumerIsRunning.set(false);
                 }
             });
         }
