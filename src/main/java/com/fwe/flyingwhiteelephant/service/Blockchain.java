@@ -74,7 +74,7 @@ public class Blockchain {
         this.blockchainContext.getNodeServer()
                 .getTransactionPool()
                 .addQueueEventListener(this::transactionPoolListener);
-        this.blockchainContext.getCurrentRaftServer().addLeaderListener(this::catchup);
+        this.blockchainContext.getCurrentRaftServer().addLeaderListener(blockchainSupport::catchup);
         log.info("Blockchain service initialized");
     }
 
@@ -85,8 +85,6 @@ public class Blockchain {
         startRaftElection();
         // plugin server start load plugins
         startPluginServer();
-        // catch up the latest blocks from other nodes
-        catchup();
         // start the block consumer
         startBlockConsumer();
         // read the current block height
@@ -146,28 +144,6 @@ public class Blockchain {
         return this.blockchainContext.getCurrentRaftServer().isLeader();
     }
 
-    private void catchup() {
-        if (!isLeaderNode() && this.blockchainContext.getCurrentRaftServer().getLeaderNodeId() > 0) { //not leader node and raft server is started and leader node is elected
-            // get the latest block height from the leader node
-            long currentHeight = getLatestBlockHeight();
-            log.info("Current height of the node: {}", currentHeight);
-            Optional<NodeClient> leaderNodeClient = Optional.ofNullable(this.blockchainContext.getNodeClientMap().get(this.blockchainContext.getCurrentRaftServer().getLeaderNodeId()));
-            leaderNodeClient.ifPresent(nodeClient -> {
-                long remoteHeight = nodeClient.getLatestHeight().orElse(0L);
-                if (currentHeight < remoteHeight) {
-                    log.info("Catch up the latest blocks from leader node, current height: {}, remote height: {}", currentHeight, remoteHeight);
-                    // get the blocks from the leader node
-                    List<Block> blocks = nodeClient.getBlocks(currentHeight + 1, remoteHeight).orElse(Collections.emptyList());
-                    if (!blocks.isEmpty()) {
-                        // write the blocks to the blockchain
-                        log.info("Write the missing blocks to the ledger, total blocks: {}", blocks.size());
-                        blocks.forEach(this.blockchainContext.getBlockchainSupport()::writeBlock);
-                    }
-                }
-            });
-        }
-    }
-
     public List<Block> getBlocks(long from, long to) {
         return this.blockchainContext.getBlockchainSupport().getBlocks(from, to);
     }
@@ -182,10 +158,11 @@ public class Blockchain {
         return this.blockchainContext.getBlockchainSupport().getBlockByHeight(height);
     }
 
-    public List<Transaction> orderTransactions(List<Transaction> transactions) {
+    public List<Transaction> orderTransactions(Transaction[] transactions) {
         // Order the transactions
-        transactions.sort(comparing(o -> o.getHeader().getTimestamp()));
-        return transactions;
+        return Arrays.stream(transactions)
+                .sorted(comparing(o->o.getHeader().getTimestamp()))
+                .toList();
     }
 
     public void broadcast(Transaction... txs) {
@@ -203,7 +180,7 @@ public class Blockchain {
             return;
         }
         if (isLeaderNode()) {
-            List<Transaction> orderedTransactions = orderTransactions(List.of(txs));
+            List<Transaction> orderedTransactions = orderTransactions(txs);
             // cut the transactions
             cutTransactions(orderedTransactions);
             log.debug("Clear the emphasized queue");

@@ -21,6 +21,7 @@ public class BlockchainStorageService {
         // save data into levelDB
         Options options = new Options();
         options.createIfMissing(true);
+        options.compressionType(CompressionType.NONE);
         ObjectMapper mapper = new ObjectMapper();
         String channelHeight = String.valueOf(block.getHeader().getHeight());
         synchronized (this) {
@@ -37,6 +38,7 @@ public class BlockchainStorageService {
     public void storeState(String key, String value) {
         Options options = new Options();
         options.createIfMissing(true);
+        options.compressionType(CompressionType.NONE);
         synchronized (this) {
             try (DB levelDB = factory.open(new File(stateDBPath), options)) {
                 levelDB.put(key.getBytes(), value.getBytes());
@@ -49,6 +51,7 @@ public class BlockchainStorageService {
     public String readState(String key) {
         Options options = new Options();
         options.createIfMissing(true);
+        options.compressionType(CompressionType.NONE);
         synchronized (this) {
             try (DB levelDB = factory.open(new File(stateDBPath), options)) {
                 byte[] value = levelDB.get(key.getBytes());
@@ -65,6 +68,7 @@ public class BlockchainStorageService {
     public Block getBlockByHeight(long l) {
         Options options = new Options();
         options.createIfMissing(true);
+        options.compressionType(CompressionType.NONE);
         ObjectMapper mapper = new ObjectMapper();
         synchronized (this) {
             try (DB levelDB = factory.open(new File(levelDBPath), options)) {
@@ -83,6 +87,7 @@ public class BlockchainStorageService {
     public long getLatestBlockHeight() {
         Options options = new Options();
         options.createIfMissing(true);
+        options.compressionType(CompressionType.NONE);
         synchronized (this) {
             try (DB levelDB = factory.open(new File(levelDBPath), options)) {
                 byte[] latest = levelDB.get("latest".getBytes());

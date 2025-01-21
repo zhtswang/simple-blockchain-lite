@@ -34,5 +34,6 @@ public class BlockchainContext {
         this.nodeServer = nodeServer;
         this.nodeServer.setContext(this);
         this.currentRaftServer.setContext(this);
+        this.getBlockchainSupport().setContext(this);
     }
 }
