@@ -42,19 +42,14 @@ public class Blockchain {
     private final AtomicLong currentBlockHeight = new AtomicLong(0L);
 
     private static final ExecutorService blockProcessExeService;
-    private final ScheduledExecutorService blockConsumerExeService = Executors.newScheduledThreadPool(1);
+
     static {
         blockProcessExeService = Executors.newFixedThreadPool(20);
     }
 
     private final Wallet wallet;
     final ObjectMapper mapper = new ObjectMapper();
-    private static final PriorityBlockingQueue<Block> blockCacheQueue;
-
-    static {
-        blockCacheQueue = new PriorityBlockingQueue<>(100,
-                (o1, o2) -> (int) (o1.getHeader().getHeight() - o2.getHeader().getHeight()));
-    }
+    private static final CachedBlockPriorityQueue blockCacheQueue = new CachedBlockPriorityQueue();
 
     private final BlockchainContext blockchainContext;
 
@@ -140,7 +135,7 @@ public class Blockchain {
 
     private void startBlockConsumer() {
         // start the block consumer
-        blockConsumerExeService.scheduleAtFixedRate(this::cachedBlocksConsumer, 0, 1, TimeUnit.MILLISECONDS);
+        blockCacheQueue.addListener(this::cachedBlocksConsumer);
     }
 
     // current node is the leader node
@@ -234,36 +229,29 @@ public class Blockchain {
         log.info("Cutting transactions, total transactions: {}, propose block height {}", orderedTransactions.size(), newBlockHeight);
         Block block = proposeBlock(orderedTransactions.toArray(new Transaction[0]));
         // cache the block
+        log.info("Put the block: {} to the cache queue.", block.getHeader().getHeight());
         blockCacheQueue.put(block);
     }
 
-    private void cachedBlocksConsumer() {
-        // consume the cached blocks
-        if (!blockCacheQueue.isEmpty()) {
-            Block block = blockCacheQueue.peek();
-            log.info("Consume the cached block, block height: {}", block.getHeader().getHeight());
-
-            ConsentResult consentResult = consent(block);
-            log.info("Consent block height:{}, result: {}", block.getHeader().getHeight(), consentResult);
-            if (consentResult.equals(ConsentResult.SUCCESS)) {
-                try {
-                    this.blockchainContext.getBlockchainSupport().writeBlock(block);
-                    // leader write the block to the local node successfully, then sync the log to other nodes
-                    RaftState.updateState(() -> this.blockchainContext.getCurrentRaftServer().getState().getLog().put(block.getHeader().getHeight(), LogEntry.builder()
-                            .term(this.blockchainContext.getCurrentRaftServer().getState().getCurrentTerm())
-                            .command(block.getHeader().getChannelId()).build()));
-                    // send the leader logs to other nodes
-                    sendLogEntries(this.blockchainContext.getCurrentRaftServer().getState().getLog());
-                } catch (Exception e) {
-                    log.error("Write Block at local node failed, rollback the block height", e);
-                    // reset the cache height
-                    this.currentBlockHeight.decrementAndGet();
-                }
-                // sync the block to all other nodes
-                deliverBlocks(block);
-                // remove the block from the cache
-                blockCacheQueue.poll();
+    private void cachedBlocksConsumer(Block block) {
+        if (consent(block).equals(ConsentResult.SUCCESS)) {
+            try {
+                this.blockchainContext.getBlockchainSupport().writeBlock(block);
+                // leader write the block to the local node successfully, then sync the log to other nodes
+                RaftState.updateState(() -> this.blockchainContext.getCurrentRaftServer().getState().getLog().put(block.getHeader().getHeight(), LogEntry.builder()
+                        .term(this.blockchainContext.getCurrentRaftServer().getState().getCurrentTerm())
+                        .command(block.getHeader().getChannelId()).build()));
+                // send the leader logs to other nodes
+                sendLogEntries(this.blockchainContext.getCurrentRaftServer().getState().getLog());
+            } catch (Exception e) {
+                log.error("Write Block at local node failed, rollback the block height", e);
+                // reset the cache height
+                this.currentBlockHeight.decrementAndGet();
             }
+            // sync the block to all other nodes
+            deliverBlocks(block);
+            // remove the block from the cache
+            blockCacheQueue.poll();
         }
     }
 

@@ -49,20 +49,20 @@ public record NodeClient(Node nodeConfig) {
 
     public void deliverBlocks(Block block) {
         // send the block to the endpoint
-        log.info("Deliver block to node: {}", nodeConfig.getId());
+        log.info("Deliver block: {} to node: {}", block.getHeader().getHeight(), nodeConfig.getId());
         channelTemplate(blockingStub -> {
             var rpcResp = blockingStub.handleDeliverBlock(NodeServiceUtils.convertBlock(block));
-            log.info("Deliver block response from node: {} is: {}", nodeConfig.getId(), rpcResp.getDescription());
+            log.info("Deliver block: {} response from node: {} is: {}", block.getHeader().getHeight(), nodeConfig.getId(), rpcResp.getDescription());
             return rpcResp;
         });
     }
 
     public Optional<DeliverStatus> deliverConsentRequest(Block block) {
         // send the block to the endpoint
-        log.info("Deliver consent request to node: {}", nodeConfig.getId());
+        log.info("Deliver consent request to node: {}, block: {}", nodeConfig.getId(), block.getHeader().getHeight());
         return channelTemplate(blockingStub -> {
             var grpcResp = blockingStub.handleConsentRequest(NodeServiceUtils.convertBlock(block));
-            log.info("Deliver consent request response from node: {} is: {}", nodeConfig.getId(), grpcResp.getDescription());
+            log.info("Deliver consent request response from node: {}, block: {} is: {}", nodeConfig.getId(), block.getHeader().getHeight(), grpcResp.getDescription());
             return DeliverStatus.fromDescription(grpcResp.getDescription());
         });
     }
