@@ -4,7 +4,6 @@ import com.fwe.flyingwhiteelephant.enums.TransactionStatus;
 import com.fwe.flyingwhiteelephant.model.*;
 import com.fwe.flyingwhiteelephant.service.crypto.Wallet;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -18,12 +17,10 @@ import java.util.stream.LongStream;
 @Getter
 @Component
 @Slf4j
-public class BlockchainSupport {
+public class BlockchainSupport extends BlockchainContextService {
     private final Wallet wallet;
     private final BlockchainStorageService storageService;
     private final SmartContractSupport smartContractSupport;
-    @Setter
-    private BlockchainContext context;
 
     public BlockchainSupport(Wallet wallet, BlockchainStorageService storageService, SmartContractSupport smartContractSupport) {
         this.wallet = wallet;

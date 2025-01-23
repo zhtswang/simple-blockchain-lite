@@ -4,8 +4,6 @@ import com.fwe.flyingwhiteelephant.model.Node;
 import com.fwe.flyingwhiteelephant.service.BlockchainContext;
 import com.fwe.flyingwhiteelephant.service.consent.raft.protocol.Raft;
 import com.fwe.flyingwhiteelephant.service.consent.raft.protocol.ConsentGrpc;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
@@ -14,14 +12,10 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 
 @Slf4j
 public class RaftServer extends ConsentGrpc.ConsentImplBase {
@@ -36,9 +30,6 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
     private Server raftServer;
     private ScheduledFuture<?> electionTask;
     @Getter
-    private final Map<Long, RaftClient> raftClientMap = new ConcurrentHashMap<>();
-
-    @Getter
     @Setter
     private BlockchainContext context;
 
@@ -52,9 +43,6 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         executorService = new ScheduledThreadPoolExecutor(4);
         try {
             this.raftServer = ServerBuilder.forPort(port).addService(this).build().start();
-            raftNodePeers.forEach(peer -> {
-                raftClientMap.computeIfAbsent(peer.getId(), id -> new RaftClient(peer));
-            });
             log.info("Raft Server started, listening on {}", port);
         } catch (IOException e) {
             log.error("Error starting Raft server", e);
@@ -117,7 +105,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         AtomicInteger votes = new AtomicInteger(1);
         // TODO: request vote concurrently, assume the vote need 1 second
         for (Node peer : peers) {
-            this.raftClientMap.get(peer.getId()).requestVote().ifPresent(status -> {
+            this.context.getRaftClientMap().get(peer.getId()).requestVote(state).ifPresent(status -> {
                 if (status == 1) {
                     votes.set(votes.get() + status);
                 }
@@ -131,90 +119,12 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
             });
             log.info("Node {}:{} get votes {}, extend half of nodes, and become leader in term {}", domainOrIp, port, votes, state.getCurrentTerm());
             for (Node peer : peers) {
-                this.raftClientMap.get(peer.getId()).broadcastHeartbeat();
+                this.context.getRaftClientMap().get(peer.getId()).broadcastHeartbeat(state);
             }
             if (electionTask != null) {
                 log.info("Node {}:{} cancels the election task as it is now the leader in term {}", domainOrIp, port, state.getCurrentTerm());
                 electionTask.cancel(false);
             }
-        }
-    }
-
-    public class RaftClient {
-        private final URI serverURI;
-
-        public RaftClient(Node peerNode) {
-            this.serverURI = peerNode.getEndpoint().getUri();
-        }
-
-        public <R> Optional<R> channelTemplate(Function<ConsentGrpc.ConsentBlockingStub, R> callback) {
-            ManagedChannel channel = null;
-            try {
-                channel = ManagedChannelBuilder.forAddress(serverURI.getHost(), serverURI.getPort() + 1000)
-                        .usePlaintext()
-                        .build();
-                ConsentGrpc.ConsentBlockingStub stub = ConsentGrpc.newBlockingStub(channel).withWaitForReady();
-                return Optional.of(callback.apply(stub));
-            } catch (Exception e) {
-                log.error("Error sending request to peer {}", serverURI);
-                // how to return a default value
-                return Optional.empty();
-            } finally {
-                if (channel != null) {
-                    channel.shutdown();
-                    try {
-                        if (channel.awaitTermination(5, TimeUnit.SECONDS)) {
-                            channel.shutdownNow();
-                        }
-                    } catch (InterruptedException e) {
-                        channel.shutdownNow();
-                    }
-                }
-            }
-        }
-
-        public void broadcastHeartbeat() {
-            // implement the logic
-            channelTemplate((stub) -> {
-                Raft.HeartbeatRequest request = Raft.HeartbeatRequest.newBuilder()
-                        .setTerm(state.getCurrentTerm())
-                        .setLeaderId(nodeId)
-                        .build();
-                Raft.HeartbeatResponse response = stub.handleHeartbeat(request);
-                log.debug("Node {}:{} send heartbeat to {}:{}, response:{}", domainOrIp, port, serverURI.getHost(), serverURI.getPort() + 1000, response.getStatus());
-                return response.getStatus();
-            });
-        }
-
-        public Optional<Integer> requestVote() {
-            Raft.VoteRequest request = Raft.VoteRequest.newBuilder()
-                    .setTerm(state.getCurrentTerm())
-                    .setCandidateId(state.getVotedFor())
-                    .build();
-            return channelTemplate(stub -> {
-                Raft.VoteResponse voteResp = stub.handleRequestVote(request);
-                return voteResp.getStatus();
-            });
-        }
-
-        public Optional<Integer> sendLogEntries(ConcurrentMap<Long, LogEntry> logEntries) {
-            // implement the logic
-            List<Raft.LogEntry> entries = logEntries.keySet().stream()
-                    .map(logEntryKey -> Raft.LogEntry.newBuilder()
-                            .setIndex(logEntryKey)
-                            .setTerm(logEntries.get(logEntryKey).getTerm())
-                            .setCommand(logEntries.get(logEntryKey).getCommand())
-                            .build())
-                    .toList();
-            Raft.AppendEntriesRequest request = Raft.AppendEntriesRequest.newBuilder()
-                    .setTerm(state.getCurrentTerm())
-                    .setLeaderId(nodeId)
-                    .addAllEntries(entries)
-                    .build();
-            return channelTemplate(stub -> {
-                Raft.AppendEntriesResponse appendEntriesResponse = stub.handleAppendEntries(request);
-                return appendEntriesResponse.getStatus();
-            });
         }
     }
 
@@ -285,12 +195,10 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         var entries = request.getEntriesList();
 
         // append the entries to the log
-        entries.forEach(entry -> {
-            state.getLog().putIfAbsent(entry.getIndex(), LogEntry.builder()
-                    .term(entry.getTerm())
-                    .command(entry.getCommand())
-                    .build());
-        });
+        entries.forEach(entry -> state.getLog().putIfAbsent(entry.getIndex(), LogEntry.builder()
+                .term(entry.getTerm())
+                .command(entry.getCommand())
+                .build()));
 
         Raft.AppendEntriesResponse response = Raft.AppendEntriesResponse.newBuilder()
                 .setStatus(1).build();

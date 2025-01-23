@@ -4,6 +4,7 @@ import com.fwe.flyingwhiteelephant.model.Node;
 import com.fwe.flyingwhiteelephant.service.NodeClient;
 import com.fwe.flyingwhiteelephant.service.NodeServer;
 import com.fwe.flyingwhiteelephant.service.TransactionPool;
+import com.fwe.flyingwhiteelephant.service.consent.raft.RaftClient;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftServer;
 import com.fwe.flyingwhiteelephant.service.plugin.PluginClient;
 import com.fwe.flyingwhiteelephant.service.plugin.PluginServer;
@@ -42,6 +43,13 @@ public class BlockchainConfig {
     @Bean
     public Node currentNodeConfig() {
         return nodeConfig.getNodes().stream().filter(node -> node.getId().equals(nodeId)).findFirst().orElseThrow();
+    }
+
+    @Bean(name = "raftClientMap")
+    public Map<Long, RaftClient> raftClientMap() {
+        Map<Long, RaftClient> raftClientMap = new HashMap<>();
+        nodeConfig.getNodes().forEach(node -> raftClientMap.put(node.getId(), new RaftClient(node)));
+        return raftClientMap;
     }
 
     @Bean(name = "raftServer")

@@ -11,6 +11,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 import com.fwe.flyingwhiteelephant.service.consent.raft.LogEntry;
+import com.fwe.flyingwhiteelephant.service.consent.raft.RaftClient;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftServer;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftState;
 import com.fwe.flyingwhiteelephant.service.crypto.IdentityType;
@@ -59,6 +60,7 @@ public class Blockchain {
                       NodeConfig nodeConfig,
                       @Qualifier("nodeClientMap") Map<Long, NodeClient> nodeClientMap,
                       @Qualifier("nodeServer") NodeServer nodeServer,
+                      @Qualifier("raftClientMap") Map<Long, RaftClient> raftClientMap,
                       @Qualifier("raftServer") RaftServer currentRaftServer,
                       @Qualifier("pluginServer") PluginServer pluginServer) {
 
@@ -67,6 +69,7 @@ public class Blockchain {
                 nodeConfig,
                 nodeClientMap,
                 nodeServer,
+                raftClientMap,
                 currentRaftServer,
                 pluginServer
         );
@@ -240,9 +243,9 @@ public class Blockchain {
         log.info("Send log entries to other nodes");
         var sendLogFutures = getNodeConfigWithoutLocal().stream()
                 .map(nodeConfig -> CompletableFuture.supplyAsync(() -> this.blockchainContext
-                                .getCurrentRaftServer()
                                 .getRaftClientMap().get(nodeConfig.getId())
-                                .sendLogEntries(logEntries), blockProcessExeService)
+                                .sendLogEntries(logEntries, this.blockchainContext
+                                        .getCurrentRaftServer().getState()), blockProcessExeService)
                         .exceptionally(
                                 e -> {
                                     log.error("Failed to send log entries to node: {}", nodeConfig.getId(), e);

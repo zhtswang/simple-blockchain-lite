@@ -53,6 +53,10 @@ curl --location 'localhost:8081/transactions/broadcast' \
 ```bash
 curl --location 'localhost:8082/api/v1/blockchain/node/1/block?from=0&to=5'
 ```
-
+#### System Architecture
+- High level architecture
+- ![High level architecture](./high_level_architecture.svg)
 <i>Notice: The project is in progress, it has many issues and can be only used to study the block
 chain knowledge.</i>
+### License
+This project is licensed under the MIT License - see the LICENSE.md file for details.
