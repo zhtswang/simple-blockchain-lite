@@ -148,10 +148,10 @@ public class Blockchain {
                 .toList();
     }
 
-    public void broadcast(Transaction... txs) {
+    public Map broadcast(Transaction... txs) {
         // collect transactions from different client apps and order them
         //TODO: next will validate the payload, it should contain
-        blockchainContext.getNodeServer().handleBroadcastTransactions(txs);
+        return blockchainContext.getNodeServer().handleBroadcastTransactions(txs);
     }
 
     private void transactionPoolListener(TransactionPool transactionPool) {

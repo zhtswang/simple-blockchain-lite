@@ -18,7 +18,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.LongStream;
 
@@ -120,7 +122,8 @@ public class NodeServer extends BlockServiceGrpc.BlockServiceImplBase {
         responseObserver.onCompleted();
     }
 
-    public void handleBroadcastTransactions(Transaction ...transactions) {
+    public Map handleBroadcastTransactions(Transaction ...transactions) {
+        Map<String, Boolean> result = new HashMap<>();
         for (Transaction txn : transactions) {
             String txnId = BlockchainUtils.generateTxId(nodeConfig.getId());
             Transaction transaction;
@@ -143,7 +146,9 @@ public class NodeServer extends BlockServiceGrpc.BlockServiceImplBase {
             log.info("Transaction:{} added to the blockchain", txnId);
             boolean addTxn = this.transactionPool.add(transaction);
             log.debug("Transaction:{} added to emphasized queue status: {}", txnId, addTxn);
+            result.put(txnId, addTxn);
         }
+        return result;
     }
 
 }

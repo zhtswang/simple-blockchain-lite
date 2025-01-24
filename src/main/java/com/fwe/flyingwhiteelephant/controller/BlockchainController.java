@@ -1,29 +1,27 @@
 package com.fwe.flyingwhiteelephant.controller;
 
-import com.fwe.flyingwhiteelephant.model.Block;
 import com.fwe.flyingwhiteelephant.service.Blockchain;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @Slf4j
-@RequestMapping(value ="/api/v1/blockchain")
+@RequestMapping(value ="/api/blockchain")
 @RestController
 public class BlockchainController {
   @Resource
   private Blockchain blockchain;
 
-  @GetMapping(value = "/node/{id}/block/latest-height")
-  public long getLatestHeight(@PathVariable("id") String leaderNodeId) {
-      log.info("Get latest block height from leader node:{}", leaderNodeId);
-      return blockchain.getLatestBlockHeight();
+  @GetMapping(value = "/latest-height")
+  public ResponseEntity<?> getLatestHeight() {
+      return new ResponseEntity<>(blockchain.getLatestBlockHeight(), HttpStatus.OK);
   }
 
-    @GetMapping(value = "/node/{id}/block")
-    public List<Block> getBlocks(@PathVariable("id") String nodeId, @RequestParam("from") long from, @RequestParam("to") long to) {
-        log.info("Get all blocks from node:{}", nodeId);
-        return blockchain.getBlocks(from, to);
+    @GetMapping(value = "/blocks")
+    public ResponseEntity<?> getBlocks(@RequestParam("from") long from, @RequestParam("to") long to) {
+        return new ResponseEntity<>(blockchain.getBlocks(from, to), HttpStatus.OK);
     }
 }

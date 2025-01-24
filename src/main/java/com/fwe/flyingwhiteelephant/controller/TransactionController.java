@@ -3,11 +3,13 @@ package com.fwe.flyingwhiteelephant.controller;
 import com.fwe.flyingwhiteelephant.model.Transaction;
 import com.fwe.flyingwhiteelephant.service.Blockchain;
 import jakarta.annotation.Resource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 
 @RestController
-@RequestMapping(value = "/transactions")
+@RequestMapping(value = "/api/transactions")
 public class TransactionController {
 
     @Resource
@@ -18,9 +20,8 @@ public class TransactionController {
      * @return
      */
     @PostMapping("/broadcast")
-    public String broadcast(@RequestBody Transaction[] transactions) {
-        blockchain.broadcast(transactions);
-        return "success";
+    public ResponseEntity<?> broadcast(@RequestBody Transaction[] transactions) {
+        return new ResponseEntity<>(blockchain.broadcast(transactions), HttpStatus.OK);
     }
 
 }
