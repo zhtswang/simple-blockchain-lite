@@ -35,6 +35,10 @@ public class Wallet implements IWallet {
         return getIdentity(cryptoSuite.readCertificatePEM(certificate));
     }
 
+    public Identity newClientIdentity() {
+        return cryptoSuite.newClientIdentity();
+    }
+
     @Override
     public void saveIdentity(Identity identity) {
        throw new UnsupportedOperationException("Not implemented yet");

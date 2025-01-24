@@ -161,6 +161,17 @@ public class CryptoSuite implements ICryptoSuite, InitializingBean {
         }
     }
 
+    @Override
+    @SneakyThrows
+    public Identity newClientIdentity() {
+        // Node server will issue one identity to the client
+        KeyPair keyPair = this.generateKeyPairInternal();
+        // save the key pair private key to one hex string
+        X509Certificate certificate = generateCertificate("CN=Client", keyPair,
+                this.walletBundle.get(IdentityType.NODE).getCertificate(),  this.walletBundle.get(IdentityType.NODE).getPrivateKey(), BigInteger.valueOf(System.currentTimeMillis()));
+        return new Identity(certificate, keyPair.getPrivate());
+    }
+
     @SneakyThrows
     private Identity generateSelfSignedRootCert() {
         // only generate the root CA once

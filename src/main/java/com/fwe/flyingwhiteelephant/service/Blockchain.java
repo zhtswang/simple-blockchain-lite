@@ -148,10 +148,15 @@ public class Blockchain {
                 .toList();
     }
 
-    public Map broadcast(Transaction... txs) {
+    public Map<String, String> broadcast(Transaction... txs) {
         // collect transactions from different client apps and order them
         //TODO: next will validate the payload, it should contain
         return blockchainContext.getNodeServer().handleBroadcastTransactions(txs);
+    }
+
+    public Map<String, Map<String, String>> enroll(String username) {
+        // enroll the user
+        return Map.of(username, blockchainContext.getWallet().newClientIdentity().toMap());
     }
 
     private void transactionPoolListener(TransactionPool transactionPool) {

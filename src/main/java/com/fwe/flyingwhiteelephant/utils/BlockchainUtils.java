@@ -16,6 +16,17 @@ public class BlockchainUtils {
         return String.valueOf((nodeId << nodeIdShift) | (timestamp << sequenceBits) | sequence);
     }
 
+    public static String parseTxId(String txId) {
+        // parse the snowflake id to get the node id, timestamp and sequence
+        int timestampBits = 41;
+        int sequenceBits = 18;
+
+        long nodeId = Long.parseLong(txId) >> (timestampBits + sequenceBits);
+        long timestamp = (Long.parseLong(txId) >> sequenceBits) & ((1L << timestampBits) - 1);
+        long sequence = Long.parseLong(txId) & ((1L << sequenceBits) - 1);
+        return String.format("nodeId: %d, timestamp: %d, sequence: %d", nodeId, timestamp, sequence);
+    }
+
     // how to construct one Merkle tree
     public static String generateMerkleRoot(List<String> txIds) {
         if (txIds == null || txIds.isEmpty()) {

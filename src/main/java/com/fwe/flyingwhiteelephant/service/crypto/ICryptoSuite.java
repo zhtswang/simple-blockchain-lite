@@ -8,4 +8,6 @@ public interface ICryptoSuite {
 
     Map<IdentityType, Identity> getWalletBundle();
     X509Certificate readCertificatePEM(String certPEM);
+
+    Identity newClientIdentity();
 }

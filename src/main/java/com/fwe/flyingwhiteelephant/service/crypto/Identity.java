@@ -7,6 +7,7 @@ import java.security.Signature;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Map;
 
 @Getter
 @Setter
@@ -37,6 +38,18 @@ public class Identity {
     public String toString() {
         return "-----BEGIN CERTIFICATE-----\n" + Base64.getEncoder().encodeToString(certificate.getEncoded()) + "\n-----END CERTIFICATE-----";
     }
+
+    @SneakyThrows
+    public String toJson() {
+        // include certificate and private key
+        return "{\"certificate\":\"" + Base64.getEncoder().encodeToString(certificate.getEncoded()) + "\",\"privateKey\":\"" + Base64.getEncoder().encodeToString(privateKey.getEncoded()) + "\"}";
+    }
+
+    @SneakyThrows
+    public Map<String, String> toMap() {
+        return Map.of("certificate", Base64.getEncoder().encodeToString(certificate.getEncoded()), "privateKey", Base64.getEncoder().encodeToString(privateKey.getEncoded()));
+    }
+
 }
 
 
