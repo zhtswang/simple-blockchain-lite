@@ -1,24 +1,15 @@
 package com.fwe.flyingwhiteelephant.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fwe.flyingwhiteelephant.config.NodeConfig;
 import com.fwe.flyingwhiteelephant.enums.ConsentResult;
-import com.fwe.flyingwhiteelephant.enums.DeliverStatus;
 import com.fwe.flyingwhiteelephant.model.*;
 
 import java.util.*;
 import java.util.concurrent.*;
 
-import com.fwe.flyingwhiteelephant.service.consent.raft.LogEntry;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftClient;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftServer;
-import com.fwe.flyingwhiteelephant.service.consent.raft.RaftState;
-import com.fwe.flyingwhiteelephant.service.crypto.IdentityType;
-import com.fwe.flyingwhiteelephant.service.crypto.Wallet;
 import com.fwe.flyingwhiteelephant.service.plugin.PluginServer;
-import com.fwe.flyingwhiteelephant.utils.BlockchainUtils;
-import com.fwe.flyingwhiteelephant.utils.HashUtils;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -26,8 +17,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StopWatch;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static java.util.Comparator.comparing;
@@ -44,14 +33,9 @@ public class Blockchain {
 
     private final AtomicLong currentBlockHeight = new AtomicLong(0L);
 
-    private static final ExecutorService blockProcessExeService;
+    private static final ExecutorService blockProposalPool = Executors.newFixedThreadPool(8);
+    private static final ExecutorService transactionForwardPool = Executors.newFixedThreadPool(8);
 
-    static {
-        blockProcessExeService = Executors.newFixedThreadPool(20);
-    }
-
-    private final Wallet wallet;
-    final ObjectMapper mapper = new ObjectMapper();
     private static final CachedBlockPriorityQueue blockCacheQueue = new CachedBlockPriorityQueue();
 
     private final BlockchainContext blockchainContext;
@@ -73,7 +57,6 @@ public class Blockchain {
                 currentRaftServer,
                 pluginServer
         );
-        this.wallet = this.blockchainContext.getBlockchainSupport().getWallet();
         this.blockchainContext.getNodeServer()
                 .getTransactionPool()
                 .addQueueEventListener(this::transactionPoolListener);
@@ -101,9 +84,11 @@ public class Blockchain {
             if (isLeaderNode()) {
                 log.info("Creating genesis block by the leader node");
                 // create a genesis block
-                Block genesisBlock = proposeBlock(null);
+                Block genesisBlock = this.blockchainContext.getBlockchainSupport().proposeBlock(null,
+                        this.currentBlockHeight,
+                        this.chainId);
                 this.blockchainContext.getBlockchainSupport().writeBlock(genesisBlock);
-                deliverBlocks(genesisBlock);
+                this.blockchainContext.getBlockchainSupport().deliverBlocks(genesisBlock, getDistributeNodes());
             }
         }
     }
@@ -123,7 +108,7 @@ public class Blockchain {
         StopWatch stopWatch = new StopWatch();
         stopWatch.start();
         try {
-            leaderElectionCompleted = latch.await(10000, java.util.concurrent.TimeUnit.MILLISECONDS);
+            leaderElectionCompleted = latch.await(30000, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         } finally {
@@ -132,7 +117,7 @@ public class Blockchain {
         if (leaderElectionCompleted) {
             log.info("Leader election completed, leader node id: {}, duration: {}", this.blockchainContext.getCurrentRaftServer().getLeaderNodeId(), stopWatch.getTotalTimeMillis());
         } else {
-            log.error("Leader election failed, timeout: {}", 10000);
+            log.error("Leader election does not complete, timeout: {}", 30000);
         }
     }
 
@@ -156,15 +141,10 @@ public class Blockchain {
         return this.blockchainContext.getBlockchainSupport().getLatestHeight();
     }
 
-    public Block getBlockByHeight(long height) {
-        // Get the block by height
-        return this.blockchainContext.getBlockchainSupport().getBlockByHeight(height);
-    }
-
     public List<Transaction> orderTransactions(Transaction[] transactions) {
         // Order the transactions
         return Arrays.stream(transactions)
-                .sorted(comparing(o->o.getHeader().getTimestamp()))
+                .sorted(comparing(o -> o.getHeader().getTimestamp()))
                 .toList();
     }
 
@@ -190,7 +170,10 @@ public class Blockchain {
         } else {
             log.info("Forward transactions to leader node: {}, total transactions: {}", this.blockchainContext.getCurrentRaftServer().getLeaderNodeId(), txs.length);
             Optional<NodeClient> leaderNodeClient = Optional.ofNullable(this.blockchainContext.getNodeClientMap().get(this.blockchainContext.getCurrentRaftServer().getLeaderNodeId()));
-            leaderNodeClient.ifPresent(nodeClient -> CompletableFuture.runAsync(() -> nodeClient.sendTransactions(txs), blockProcessExeService).exceptionally(
+            leaderNodeClient.ifPresent(nodeClient -> CompletableFuture.runAsync(() -> {
+                var resp = nodeClient.sendTransactions(txs);
+                log.info("Forward transactions to leader node: {}, response: {}", this.blockchainContext.getCurrentRaftServer().getLeaderNodeId(), resp.orElse("Failed"));
+            }, transactionForwardPool).exceptionally(
                     e -> {
                         log.error("Failed to send transactions to leader node", e);
                         return null;
@@ -202,7 +185,7 @@ public class Blockchain {
     }
 
     public void cutTransactions(List<Transaction> orderedTransactions) {
-        blockProcessExeService.submit(() -> blockProducer(orderedTransactions));
+        blockProposalPool.submit(() -> blockProducer(orderedTransactions));
     }
 
     private void blockProducer(List<Transaction> orderedTransactions) {
@@ -210,153 +193,38 @@ public class Blockchain {
         long newBlockHeight = this.currentBlockHeight.incrementAndGet();
         // Cut the transactions
         log.info("Cutting transactions, total transactions: {}, propose block height {}", orderedTransactions.size(), newBlockHeight);
-        Block block = proposeBlock(orderedTransactions.toArray(new Transaction[0]));
+        Block block = this.blockchainContext.getBlockchainSupport().proposeBlock(
+                orderedTransactions.toArray(new Transaction[0]),
+                this.currentBlockHeight,
+                this.chainId);
         // cache the block
         log.info("Put the block: {} to the cache queue.", block.getHeader().getHeight());
         blockCacheQueue.put(block);
     }
 
     private void cachedBlocksConsumer(Block block) {
-        if (consent(block).equals(ConsentResult.SUCCESS)) {
+        var consentResult = this.blockchainContext.getBlockchainSupport().consent(block, getDistributeNodes());
+        if (consentResult.equals(ConsentResult.SUCCESS)) {
             try {
                 this.blockchainContext.getBlockchainSupport().writeBlock(block);
                 // leader write the block to the local node successfully, then sync the log to other nodes
-                RaftState.updateState(() -> this.blockchainContext.getCurrentRaftServer().getState().getLog().put(block.getHeader().getHeight(), LogEntry.builder()
-                        .term(this.blockchainContext.getCurrentRaftServer().getState().getCurrentTerm())
-                        .command(block.getHeader().getChannelId()).build()));
+                this.blockchainContext.getCurrentRaftServer().updateRaftState(block.getHeader().getHeight(), this.chainId);
                 // send the leader logs to other nodes
-                sendLogEntries(this.blockchainContext.getCurrentRaftServer().getState().getLog());
+                this.blockchainContext.getCurrentRaftServer().sendLogEntries(this.blockchainContext.getCurrentRaftServer().getState().getLog(), getDistributeNodes());
             } catch (Exception e) {
                 log.error("Write Block at local node failed, rollback the block height", e);
                 // reset the cache height
                 this.currentBlockHeight.decrementAndGet();
             }
             // sync the block to all other nodes
-            deliverBlocks(block);
+            this.blockchainContext.getBlockchainSupport().deliverBlocks(block, getDistributeNodes());
             // remove the block from the cache
             blockCacheQueue.poll();
         }
     }
 
-    private void sendLogEntries(ConcurrentMap<Long, LogEntry> logEntries) {
-        // send the log entries to other nodes
-        log.info("Send log entries to other nodes");
-        var sendLogFutures = getNodeConfigWithoutLocal().stream()
-                .map(nodeConfig -> CompletableFuture.supplyAsync(() -> this.blockchainContext
-                                .getRaftClientMap().get(nodeConfig.getId())
-                                .sendLogEntries(logEntries, this.blockchainContext
-                                        .getCurrentRaftServer().getState()), blockProcessExeService)
-                        .exceptionally(
-                                e -> {
-                                    log.error("Failed to send log entries to node: {}", nodeConfig.getId(), e);
-                                    return Optional.empty();
-                                }
-                        )).toList();
-        var resp = CompletableFuture
-                .allOf(sendLogFutures.toArray(new CompletableFuture[0]))
-                .thenApply(v -> sendLogFutures.stream().map(CompletableFuture::join).toList())
-                .join();
-        log.info("Send log entries to other nodes response: {}", resp);
-        for (Optional<Integer> status : resp) {
-            status.ifPresent(s -> {
-                if (s != 1) {
-                    log.error("Failed to send log entries to other nodes");
-                }
-            });
-        }
-    }
-
-    public Block proposeBlock(Transaction[] orderedTransactions) {
-        String transactionRoot = null;
-        // construct one market root tree
-        if (orderedTransactions != null) {
-            transactionRoot = BlockchainUtils.generateMerkleRoot(Arrays.stream(orderedTransactions).map(tx -> {
-                try {
-                    return HashUtils.sha256(mapper.writeValueAsString(tx));
-                } catch (JsonProcessingException e) {
-                    throw new RuntimeException(e);
-                }
-            }).toList());
-        }
-        BlockHeader header = BlockHeader.builder()
-                .channelId(this.chainId)
-                .height(this.currentBlockHeight.get())
-                .transactionsRoot(transactionRoot)
-                .timestamp(System.currentTimeMillis())
-                .build();
-        Block block = Block.builder()
-                .header(header)
-                .transactions(orderedTransactions != null ? orderedTransactions : new Transaction[0])
-                .build();
-        String blockHash;
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA256").digest(mapper.writeValueAsBytes(block));
-            blockHash = HexFormat.of().formatHex(hash);
-            block.getHeader().setHash(blockHash);
-            if (orderedTransactions != null) {
-                Block perviousBlock = getBlockByHeight(this.currentBlockHeight.get() - 1);
-                if (perviousBlock != null) {
-                    block.getHeader().setParentHash(perviousBlock.getHeader().getHash());
-                }
-            }
-            // sign the block by the leader
-            block.setSignature(wallet.getIdentity(IdentityType.NODE).sign(blockHash));
-            block.setSigner(wallet.getIdentity(IdentityType.NODE).toString());
-            log.debug("Block signed by {}, hash: {}, signature: {}", wallet.getIdentity(IdentityType.NODE).toString(), blockHash, block.getSignature());
-        } catch (NoSuchAlgorithmException | JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
-        log.info("Propose a new block, block height: {}, block hash: {}", block.getHeader().getHeight(), blockHash);
-        return block;
-    }
-
-    public ConsentResult consent(Block block) {
-        int consentStatus = 0;
-        // Consent the block
-        if (this.blockchainContext.getBlockchainSupport().verify(block)) {
-            consentStatus = 1;
-            //deliver the block to other nodes
-            List<Optional<DeliverStatus>> deliverStatus = deliverConsentRequest(block);
-            for (Optional<DeliverStatus> status : deliverStatus) {
-                consentStatus = consentStatus & status.orElse(DeliverStatus.FAILED).getCode();
-            }
-        }
-        return consentStatus == 1 ? ConsentResult.SUCCESS : ConsentResult.FAIL;
-    }
-
-    public List<Optional<DeliverStatus>> deliverConsentRequest(Block block) {
-        log.debug("Deliver block consent request to other active nodes");
-        // Deliver the block to other nodes
-        List<CompletableFuture<Optional<DeliverStatus>>> futures = getNodeConfigWithoutLocal().stream()
-                .map(nodeConfig -> CompletableFuture.supplyAsync(() -> this.blockchainContext.getNodeClientMap().get(nodeConfig.getId())
-                                .deliverConsentRequest(block), blockProcessExeService)
-                        .exceptionally(
-                                e -> {
-                                    log.error("Failed to send block consent request to node: {}", nodeConfig.getId(), e);
-                                    return Optional.of(DeliverStatus.FAILED);
-                                }
-                        )).toList();
-        return CompletableFuture
-                .allOf(futures.toArray(new CompletableFuture[0]))
-                .thenApply(v -> futures.stream().map(CompletableFuture::join).toList())
-                .join();
-    }
-
-    public void deliverBlocks(Block block) {
-        log.debug("Deliver block to other active nodes");
-        // Deliver the block to other nodes
-        getNodeConfigWithoutLocal()
-                .forEach(nodeConfig -> CompletableFuture.runAsync(() -> this.blockchainContext.getNodeClientMap().get(nodeConfig.getId()).deliverBlocks(block), blockProcessExeService)
-                        .exceptionally(
-                                e -> {
-                                    log.error("Failed to send block to node: {}", nodeConfig.getId(), e);
-                                    return null;
-                                }
-                        ));
-    }
-
     @SneakyThrows
-    private List<Node> getNodeConfigWithoutLocal() {
+    private List<Node> getDistributeNodes() {
         // exclude node itself
         return this.blockchainContext.getNodeConfig().getNodes().stream().filter(node -> !node.getId().equals(this.nodeId)).toList();
     }

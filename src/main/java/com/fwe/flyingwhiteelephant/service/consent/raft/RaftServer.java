@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -29,6 +30,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
     private ScheduledFuture<?> monitorElectionTask;
     private Server raftServer;
     private ScheduledFuture<?> electionTask;
+    private final ExecutorService transactionForwardPool = Executors.newFixedThreadPool(4);
     @Getter
     @Setter
     private BlockchainContext context;
@@ -107,7 +109,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         for (Node peer : peers) {
             this.context.getRaftClientMap().get(peer.getId()).requestVote(state).ifPresent(status -> {
                 if (status == 1) {
-                    votes.set(votes.get() + status);
+                    votes.getAndIncrement();
                 }
             });
         }
@@ -125,6 +127,40 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
                 log.info("Node {}:{} cancels the election task as it is now the leader in term {}", domainOrIp, port, state.getCurrentTerm());
                 electionTask.cancel(false);
             }
+        }
+    }
+
+    public void updateRaftState(Long blockHeight, String channelId) {
+        RaftState.updateState(() -> this.getState().getLog().put(blockHeight, LogEntry.builder()
+                .term(this.getState().getCurrentTerm())
+                .command(channelId).build()));
+    }
+
+    public void sendLogEntries(ConcurrentMap<Long, LogEntry> logEntries, List<Node> distributeNodes) {
+        // send the log entries to other nodes
+        log.info("Send log entries to other nodes");
+        var sendLogFutures = distributeNodes.stream()
+                .map(nodeConfig -> CompletableFuture.supplyAsync(() -> this.context
+                                .getRaftClientMap().get(nodeConfig.getId())
+                                .sendLogEntries(logEntries, this.context
+                                        .getCurrentRaftServer().getState()), transactionForwardPool)
+                        .exceptionally(
+                                e -> {
+                                    log.error("Failed to send log entries to node: {}", nodeConfig.getId(), e);
+                                    return Optional.empty();
+                                }
+                        )).toList();
+        var resp = CompletableFuture
+                .allOf(sendLogFutures.toArray(new CompletableFuture[0]))
+                .thenApply(v -> sendLogFutures.stream().map(CompletableFuture::join).toList())
+                .join();
+        log.info("Send log entries to other nodes response: {}", resp);
+        for (Optional<Integer> status : resp) {
+            status.ifPresent(s -> {
+                if (s != 1) {
+                    log.error("Failed to send log entries to other nodes");
+                }
+            });
         }
     }
 

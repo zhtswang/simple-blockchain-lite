@@ -17,9 +17,7 @@ import java.util.function.Function;
 @Slf4j
 public class RaftClient {
     private final URI serverURI;
-    private final Node node;
     public RaftClient(Node peerNode) {
-        this.node = peerNode;
         this.serverURI = peerNode.getEndpoint().getUri();
     }
 
