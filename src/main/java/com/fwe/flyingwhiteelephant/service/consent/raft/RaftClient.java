@@ -63,6 +63,7 @@ public class RaftClient {
         Raft.VoteRequest request = Raft.VoteRequest.newBuilder()
                 .setTerm(state.getCurrentTerm())
                 .setCandidateId(state.getVotedFor())
+                .setLastLogHeight(state.getLastLogHeight())
                 .build();
         return channelTemplate(stub -> {
             Raft.VoteResponse voteResp = stub.handleRequestVote(request);

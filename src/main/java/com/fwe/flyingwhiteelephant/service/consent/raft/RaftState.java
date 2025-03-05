@@ -33,6 +33,10 @@ public class RaftState {
     @Getter
     private Long leaderNodeId;
 
+    @Getter
+    @Setter
+    private Long lastLogHeight;
+
     public RaftState() {
         this.role = Role.FOLLOWER;
         this.currentTerm = 0;
@@ -40,6 +44,7 @@ public class RaftState {
         this.log = new ConcurrentHashMap<>();
         this.voteStatus = VoteStatus.INIT;
         this.leaderNodeId = -1L; // no leader
+        this.lastLogHeight = 0L; // initialize with 0
     }
 
     public static void updateState(Runnable runnable) {

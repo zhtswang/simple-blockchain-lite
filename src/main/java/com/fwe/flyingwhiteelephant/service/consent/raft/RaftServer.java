@@ -94,25 +94,42 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
 
     // 开始选举
     private void electLeader() {
+        // Update current block height before election
+        Long currentHeight = context.getBlockchainSupport().getLatestHeight();
+        
         // 增加当前任期并投票给自己
         RaftState.updateState(() -> {
             state.setCurrentTerm(state.getCurrentTerm() + 1);
             state.setVoteStatus(VoteStatus.PROGRESS);
             state.setVotedFor(nodeId);
-            log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}", domainOrIp, port, state.getCurrentTerm(), state.getVotedFor(),
-                    state.getRole());
+            state.setLastLogHeight(currentHeight);
+            log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}, block height {}", 
+                domainOrIp, port, state.getCurrentTerm(), state.getVotedFor(),
+                state.getRole(), currentHeight);
             state.setRole(Role.CANDIDATE);
         });
 
         AtomicInteger votes = new AtomicInteger(1);
-        // TODO: request vote concurrently, assume the vote need 1 second
-        for (Node peer : peers) {
-            this.context.getRaftClientMap().get(peer.getId()).requestVote(state).ifPresent(status -> {
-                if (status == 1) {
-                    votes.getAndIncrement();
-                }
-            });
+        // Process vote requests concurrently
+        List<CompletableFuture<Void>> voteFutures = peers.stream()
+            .map(peer -> CompletableFuture.runAsync(() -> 
+                this.context.getRaftClientMap().get(peer.getId())
+                    .requestVote(state)
+                    .ifPresent(status -> {
+                        if (status == 1) {
+                            votes.getAndIncrement();
+                        }
+                    }), transactionForwardPool))
+            .toList();
+
+        // Wait for all votes to complete with a timeout
+        try {
+            CompletableFuture.allOf(voteFutures.toArray(new CompletableFuture[0]))
+                .get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            log.warn("Vote collection interrupted or timed out: {}", e.getMessage());
         }
+            
         if (votes.get() > peers.size() / 2) {
             RaftState.updateState(() -> {
                 state.setRole(Role.LEADER);
@@ -166,23 +183,32 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
 
     @Override
     public void handleRequestVote(Raft.VoteRequest request, StreamObserver<Raft.VoteResponse> responseObserver) {
-        // 处理请求投票
-        // implement the logic only vote once in a term
         int status = 0; // 0: refuse, 1: agree
-        if (request.getTerm() > state.getCurrentTerm()) {
-            log.info("Node {}:{} update term to {}, vote for node:{} in term {}", domainOrIp, port, request.getTerm(), request.getCandidateId(), state.getCurrentTerm());
+        
+        // Only vote if the candidate's log is at least as up-to-date as ours
+        boolean isLogUpToDate = request.getLastLogHeight() >= state.getLastLogHeight();
+        
+        if (request.getTerm() > state.getCurrentTerm() && isLogUpToDate) {
+            log.info("Node {}:{} update term to {}, vote for node:{} in term {}, candidate log height: {}, our log height: {}", 
+                domainOrIp, port, request.getTerm(), request.getCandidateId(), state.getCurrentTerm(), 
+                request.getLastLogHeight(), state.getLastLogHeight());
             RaftState.updateState(() -> {
                 state.setCurrentTerm(request.getTerm());
                 state.setRole(Role.FOLLOWER);
                 state.setVotedFor(request.getCandidateId());
             });
             status = 1;
-        } else if (request.getTerm() == state.getCurrentTerm()
-                && state.getVotedFor() == -1L) {
+        } else if (request.getTerm() == state.getCurrentTerm() 
+                && state.getVotedFor() == -1L 
+                && isLogUpToDate) {
             RaftState.updateState(() -> state.setVotedFor(request.getCandidateId()));
             status = 1;
         }
-        log.debug("Node {}:{} vote for node:{} in term {}, vote result: {}", domainOrIp, port, request.getCandidateId(), request.getTerm(), status);
+        
+        log.debug("Node {}:{} vote for node:{} in term {}, vote result: {}, candidate log height: {}, our log height: {}", 
+            domainOrIp, port, request.getCandidateId(), request.getTerm(), status,
+            request.getLastLogHeight(), state.getLastLogHeight());
+        
         Raft.VoteResponse response = Raft.VoteResponse.newBuilder()
                 .setStatus(status).build();
         responseObserver.onNext(response);
