@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
 
 @Slf4j
 public class RaftServer extends ConsentGrpc.ConsentImplBase {
@@ -97,54 +98,130 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         // Update current block height before election
         Long currentHeight = context.getBlockchainSupport().getLatestHeight();
         
-        // 增加当前任期并投票给自己
+        // Reset election timeout with randomization
+        int electionTimeout = context.getRaftConfig().getRandomElectionTimeout();
+        
+        // Increment term and vote for self
         RaftState.updateState(() -> {
             state.setCurrentTerm(state.getCurrentTerm() + 1);
             state.setVoteStatus(VoteStatus.PROGRESS);
             state.setVotedFor(nodeId);
             state.setLastLogHeight(currentHeight);
-            log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}, block height {}", 
+            state.updateLastHeartbeat(); // Reset heartbeat timer
+            
+            log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}, block height {}, timeout {}ms", 
                 domainOrIp, port, state.getCurrentTerm(), state.getVotedFor(),
-                state.getRole(), currentHeight);
+                state.getRole(), currentHeight, electionTimeout);
             state.setRole(Role.CANDIDATE);
         });
 
-        AtomicInteger votes = new AtomicInteger(1);
-        // Process vote requests concurrently
-        List<CompletableFuture<Void>> voteFutures = peers.stream()
-            .map(peer -> CompletableFuture.runAsync(() -> 
+        // Collect votes concurrently with timeout
+        AtomicInteger votes = new AtomicInteger(1); // Vote for self
+        CountDownLatch votingComplete = new CountDownLatch(peers.size());
+        
+        peers.forEach(peer -> CompletableFuture.runAsync(() -> {
+            try {
                 this.context.getRaftClientMap().get(peer.getId())
                     .requestVote(state)
                     .ifPresent(status -> {
                         if (status == 1) {
                             votes.getAndIncrement();
                         }
-                    }), transactionForwardPool))
-            .toList();
+                    });
+            } finally {
+                votingComplete.countDown();
+            }
+        }, transactionForwardPool));
 
-        // Wait for all votes to complete with a timeout
         try {
-            CompletableFuture.allOf(voteFutures.toArray(new CompletableFuture[0]))
-                .get(10, TimeUnit.SECONDS);
-        } catch (InterruptedException | ExecutionException | TimeoutException e) {
-            log.warn("Vote collection interrupted or timed out: {}", e.getMessage());
-        }
+            // Wait for all votes or timeout
+            boolean votingFinished = votingComplete.await(electionTimeout, TimeUnit.MILLISECONDS);
+            if (!votingFinished) {
+                log.warn("Election voting timed out after {}ms", electionTimeout);
+                return;
+            }
             
-        if (votes.get() > peers.size() / 2) {
-            RaftState.updateState(() -> {
-                state.setRole(Role.LEADER);
-                state.setLeaderNodeId(nodeId);
-                state.setVoteStatus(VoteStatus.COMPLETED);
-            });
-            log.info("Node {}:{} get votes {}, extend half of nodes, and become leader in term {}", domainOrIp, port, votes, state.getCurrentTerm());
-            for (Node peer : peers) {
-                this.context.getRaftClientMap().get(peer.getId()).broadcastHeartbeat(state);
+            // Check if we won the election
+            if (votes.get() > peers.size() / 2) {
+                becomeLeader();
             }
-            if (electionTask != null) {
-                log.info("Node {}:{} cancels the election task as it is now the leader in term {}", domainOrIp, port, state.getCurrentTerm());
-                electionTask.cancel(false);
-            }
+        } catch (InterruptedException e) {
+            log.error("Election interrupted", e);
+            Thread.currentThread().interrupt();
         }
+    }
+
+    private void becomeLeader() {
+        RaftState.updateState(() -> {
+            state.setRole(Role.LEADER);
+            state.setLeaderNodeId(nodeId);
+            state.setVoteStatus(VoteStatus.COMPLETED);
+            state.resetLeaderState(peers.stream().map(Node::getId).toList());
+        });
+        
+        log.info("Node {}:{} became leader in term {}", domainOrIp, port, state.getCurrentTerm());
+        
+        // Start heartbeat immediately
+        sendHeartbeats();
+        
+        // Schedule regular heartbeats
+        if (electionTask != null) {
+            log.info("Cancelling election task as node is now leader");
+            electionTask.cancel(false);
+        }
+        
+        // Schedule heartbeat task
+        electionTask = executorService.scheduleAtFixedRate(
+            this::sendHeartbeats,
+            0,
+            context.getRaftConfig().getHeartbeatInterval(),
+            TimeUnit.MILLISECONDS
+        );
+    }
+
+    private void sendHeartbeats() {
+        if (!isLeader()) {
+            return;
+        }
+
+        peers.forEach(peer -> CompletableFuture.runAsync(() -> {
+            try {
+                Long peerId = peer.getId();
+                Long nextIdx = state.getNextIndex().get(peerId);
+
+                // Prepare log entries to send
+                List<LogEntry> entriesToSend = new ArrayList<>();
+                if (nextIdx != null && nextIdx <= state.getLastLogHeight()) {
+                    for (long i = nextIdx; i <= state.getLastLogHeight(); i++) {
+                        LogEntry entry = state.getLog().get(i);
+                        if (entry != null) {
+                            entriesToSend.add(entry);
+                            if (entriesToSend.size() >= context.getRaftConfig().getMaxBatchSize()) {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Send heartbeat with any pending entries
+                this.context.getRaftClientMap().get(peerId)
+                    .broadcastHeartbeat(state, entriesToSend)
+                    .ifPresent(status -> {
+                        if (status == 1 && !entriesToSend.isEmpty()) {
+                            // Update matchIndex and nextIndex on successful replication
+                            state.getMatchIndex().put(peerId,
+                                entriesToSend.get(entriesToSend.size() - 1).getIndex());
+                            state.getNextIndex().put(peerId,
+                                state.getMatchIndex().get(peerId) + 1);
+
+                            // Try to advance commit index
+                            state.updateCommitIndex();
+                        }
+                    });
+            } catch (Exception e) {
+                log.error("Error sending heartbeat to peer: {}", peer.getId(), e);
+            }
+        }, transactionForwardPool));
     }
 
     public void updateRaftState(Long blockHeight, String channelId) {
@@ -233,7 +310,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
                 startElection();
             }
         } else {
-            if (electionTask != null) {
+            if (electionTask != null && !electionTask.isCancelled()) {
                 log.info("Node {}:{} cancel election task in term {}", domainOrIp, port, state.getCurrentTerm());
                 electionTask.cancel(false);
             }
@@ -251,20 +328,63 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
     }
 
     @Override
-    public void handleAppendEntries(Raft.AppendEntriesRequest request, StreamObserver<Raft.AppendEntriesResponse> responseObserver) {
-        // implement the logic
-        log.info("Node {}:{} receive append entries from leader {} in term {}", domainOrIp, port, request.getLeaderId(), request.getTerm());
-        var entries = request.getEntriesList();
-
-        // append the entries to the log
-        entries.forEach(entry -> state.getLog().putIfAbsent(entry.getIndex(), LogEntry.builder()
-                .term(entry.getTerm())
-                .command(entry.getCommand())
-                .build()));
-
-        Raft.AppendEntriesResponse response = Raft.AppendEntriesResponse.newBuilder()
-                .setStatus(1).build();
-        responseObserver.onNext(response);
+    public void handleAppendEntries(Raft.AppendEntriesRequest request, 
+                                  StreamObserver<Raft.AppendEntriesResponse> responseObserver) {
+        int status = 0;
+        try {
+            // Update term if needed
+            if (request.getTerm() > state.getCurrentTerm()) {
+                stepDown(request.getTerm());
+            }
+            
+            // Validate request
+            if (request.getTerm() < state.getCurrentTerm()) {
+                log.warn("Rejected AppendEntries: term {} < current term {}", 
+                    request.getTerm(), state.getCurrentTerm());
+            } else {
+                // Valid AppendEntries, update leader and heartbeat
+                state.setLeaderNodeId(request.getLeaderId());
+                state.updateLastHeartbeat();
+                
+                // Process entries
+                var entries = request.getEntriesList();
+                if (!entries.isEmpty()) {
+                    for (Raft.LogEntry entry : entries) {
+                        state.getLog().putIfAbsent(entry.getIndex(), 
+                            LogEntry.builder()
+                                .index(entry.getIndex())
+                                .term(entry.getTerm())
+                                .command(entry.getCommand())
+                                .timestamp(System.currentTimeMillis())
+                                .build());
+                    }
+                    
+                    // Update lastLogHeight
+                    state.setLastLogHeight(Math.max(
+                        state.getLastLogHeight(),
+                        entries.get(entries.size() - 1).getIndex()
+                    ));
+                }
+                status = 1;
+            }
+        } catch (Exception e) {
+            log.error("Error handling AppendEntries", e);
+        }
+        
+        responseObserver.onNext(Raft.AppendEntriesResponse.newBuilder()
+            .setStatus(status)
+            .build());
         responseObserver.onCompleted();
+    }
+
+    private void stepDown(int newTerm) {
+        RaftState.updateState(() -> {
+            state.setCurrentTerm(newTerm);
+            state.setRole(Role.FOLLOWER);
+            state.setVotedFor(-1L);
+            if (electionTask != null) {
+                electionTask.cancel(false);
+            }
+        });
     }
 }

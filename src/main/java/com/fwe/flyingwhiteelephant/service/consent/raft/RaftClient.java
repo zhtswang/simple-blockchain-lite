@@ -8,6 +8,7 @@ import io.grpc.ManagedChannelBuilder;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
@@ -47,16 +48,40 @@ public class RaftClient {
         }
     }
 
-    public void broadcastHeartbeat(RaftState state) {
-        // implement the logic
-        channelTemplate((stub) -> {
-            Raft.HeartbeatRequest request = Raft.HeartbeatRequest.newBuilder()
+    public Optional<Integer> broadcastHeartbeat(RaftState state, List<LogEntry> entries) {
+        return channelTemplate((stub) -> {
+            Raft.HeartbeatRequest.Builder requestBuilder = Raft.HeartbeatRequest.newBuilder()
+                    .setTerm(state.getCurrentTerm())
+                    .setLeaderId(state.getLeaderNodeId());
+
+            // If we have entries to send, convert them to AppendEntries instead
+            if (!entries.isEmpty()) {
+                List<Raft.LogEntry> protoEntries = entries.stream()
+                    .map(entry -> Raft.LogEntry.newBuilder()
+                        .setIndex(entry.getIndex())
+                        .setTerm(entry.getTerm())
+                        .setCommand(entry.getCommand())
+                        .build())
+                    .toList();
+                
+                Raft.AppendEntriesRequest appendRequest = Raft.AppendEntriesRequest.newBuilder()
                     .setTerm(state.getCurrentTerm())
                     .setLeaderId(state.getLeaderNodeId())
+                    .addAllEntries(protoEntries)
                     .build();
-            Raft.HeartbeatResponse response = stub.handleHeartbeat(request);
+                
+                return stub.handleAppendEntries(appendRequest).getStatus();
+            }
+
+            // Otherwise just send heartbeat
+            Raft.HeartbeatResponse response = stub.handleHeartbeat(requestBuilder.build());
             return response.getStatus();
         });
+    }
+
+    // Keep old method for backward compatibility
+    public Optional<Integer> broadcastHeartbeat(RaftState state) {
+        return broadcastHeartbeat(state, new ArrayList<>());
     }
 
     public Optional<Integer> requestVote(RaftState state) {

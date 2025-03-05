@@ -72,7 +72,7 @@ public class NodeServer extends BlockServiceGrpc.BlockServiceImplBase {
 
     @Override
     public void handleGetLatestBlockHeight(NodeRPC.BlockHeightRequest request, StreamObserver<NodeRPC.BlockHeight> responseObserver) {
-        log.info("Handle latest block height requests node server:{}", request.getNodeId());
+        log.debug("Handle latest block height requests node server:{}", request.getNodeId());
         long latestBlockHeight = this.context.getBlockchainSupport().getStorageService().getLatestBlockHeight();
         responseObserver.onNext(NodeRPC.BlockHeight.newBuilder().setHeight(latestBlockHeight).build());
         responseObserver.onCompleted();

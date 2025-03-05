@@ -2,6 +2,7 @@ package com.fwe.flyingwhiteelephant.service;
 
 import com.fwe.flyingwhiteelephant.config.NodeConfig;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftClient;
+import com.fwe.flyingwhiteelephant.service.consent.raft.RaftConfig;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftServer;
 import com.fwe.flyingwhiteelephant.service.crypto.Wallet;
 import com.fwe.flyingwhiteelephant.service.plugin.PluginServer;
@@ -20,6 +21,7 @@ public class BlockchainContext {
     private final RaftServer currentRaftServer;
     private final NodeServer nodeServer;
     private final Map<Long, RaftClient> raftClientMap;
+    private final RaftConfig raftConfig;
 
     public BlockchainContext(BlockchainSupport blockchainSupport,
                              NodeConfig nodeConfig,
@@ -32,10 +34,11 @@ public class BlockchainContext {
         this.wallet = blockchainSupport.getWallet();
         this.nodeConfig = nodeConfig;
         this.nodeClientMap = nodeClientMap;
-        this.pluginServer = pluginServer;
-        this.currentRaftServer = currentRaftServer;
         this.nodeServer = nodeServer;
         this.raftClientMap = raftClientMap;
+        this.currentRaftServer = currentRaftServer;
+        this.pluginServer = pluginServer;
+        this.raftConfig = new RaftConfig();
         this.nodeServer.setContext(this);
         this.currentRaftServer.setContext(this);
         this.blockchainSupport.setContext(this);
