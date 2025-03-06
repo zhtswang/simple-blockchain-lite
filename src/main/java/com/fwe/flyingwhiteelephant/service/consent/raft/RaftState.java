@@ -2,15 +2,20 @@ package com.fwe.flyingwhiteelephant.service.consent.raft;
 
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+@Slf4j
 public class RaftState {
-    private final static  ReentrantLock stateLock = new ReentrantLock();
+    private final static ReentrantLock stateLock = new ReentrantLock();
+    private static final long LOCK_TIMEOUT_MS = 1000;
+
     private Runnable leaderListener;
     @Getter
     @Setter
@@ -29,7 +34,7 @@ public class RaftState {
 
     @Getter
     @Setter
-    private ConcurrentMap<Long, LogEntry> log;
+    private ConcurrentMap<Long, LogEntry> logEntries;
 
     @Getter
     @Setter
@@ -62,7 +67,7 @@ public class RaftState {
         this.role = Role.FOLLOWER;
         this.currentTerm = 0;
         this.votedFor = -1L;
-        this.log = new ConcurrentHashMap<>();
+        this.logEntries = new ConcurrentHashMap<>();
         this.voteStatus = VoteStatus.INIT;
         this.leaderNodeId = -1L; // no leader
         this.lastLogHeight = 0L; // initialize with 0
@@ -74,11 +79,21 @@ public class RaftState {
     }
 
     public static void updateState(Runnable runnable) {
-        stateLock.lock();
+        boolean locked = false;
         try {
+            locked = stateLock.tryLock(LOCK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            if (!locked) {
+                log.error("Failed to acquire state lock after {}ms", LOCK_TIMEOUT_MS);
+                return;
+            }
             runnable.run();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("State update interrupted", e);
         } finally {
-            stateLock.unlock();
+            if (locked) {
+                stateLock.unlock();
+            }
         }
     }
 
@@ -87,8 +102,13 @@ public class RaftState {
     }
 
     public void setLeaderNodeId(Long leaderNodeId) {
+        Long oldLeaderId = this.leaderNodeId;
         this.leaderNodeId = leaderNodeId;
-        if (leaderListener != null && leaderNodeId != -1) { // leader is elected and notify the listener
+        // Only trigger listener if:
+        // 1. We have a listener
+        // 2. New leader is valid (not -1)
+        // 3. This is actually a change in leadership
+        if (leaderListener != null && leaderNodeId != -1 && !leaderNodeId.equals(oldLeaderId)) {
             CompletableFuture.runAsync(leaderListener);
         }
     }
@@ -117,7 +137,7 @@ public class RaftState {
             }
             
             // Check if we have majority and entry is from current term
-            LogEntry entry = log.get(n);
+            LogEntry entry = logEntries.get(n);
             if (replicationCount > (matchIndex.size() + 1) / 2 && 
                 entry != null && entry.getTerm() == currentTerm) {
                 commitIndex = n;
@@ -126,7 +146,7 @@ public class RaftState {
     }
 
     public boolean isLogUpToDate(long lastLogTerm, long lastLogIndex) {
-        LogEntry lastEntry = log.get(lastLogHeight);
+        LogEntry lastEntry = logEntries.get(lastLogHeight);
         if (lastEntry == null) {
             return true;
         }

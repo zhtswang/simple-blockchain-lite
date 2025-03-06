@@ -193,7 +193,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
                 List<LogEntry> entriesToSend = new ArrayList<>();
                 if (nextIdx != null && nextIdx <= state.getLastLogHeight()) {
                     for (long i = nextIdx; i <= state.getLastLogHeight(); i++) {
-                        LogEntry entry = state.getLog().get(i);
+                        LogEntry entry = state.getLogEntries().get(i);
                         if (entry != null) {
                             entriesToSend.add(entry);
                             if (entriesToSend.size() >= context.getRaftConfig().getMaxBatchSize()) {
@@ -225,9 +225,25 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
     }
 
     public void updateRaftState(Long blockHeight, String channelId) {
-        RaftState.updateState(() -> this.getState().getLog().put(blockHeight, LogEntry.builder()
+        RaftState.updateState(() -> {
+            LogEntry entry = LogEntry.builder()
                 .term(this.getState().getCurrentTerm())
-                .command(channelId).build()));
+                .command(channelId)
+                .index(blockHeight)
+                .timestamp(System.currentTimeMillis())
+                .build();
+            
+            if (!entry.isValid()) {
+                log.error("Invalid log entry: {}", entry);
+                return;
+            }
+            
+            this.getState().getLogEntries().put(blockHeight, entry);
+            this.getState().setLastLogHeight(Math.max(
+                this.getState().getLastLogHeight(),
+                blockHeight
+            ));
+        });
     }
 
     public void sendLogEntries(ConcurrentMap<Long, LogEntry> logEntries, List<Node> distributeNodes) {
@@ -294,36 +310,32 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
 
     @Override
     public void handleHeartbeat(Raft.HeartbeatRequest request, StreamObserver<Raft.HeartbeatResponse> responseObserver) {
-        // implement the logic
-        log.info("Node {}:{} receive heartbeat from leader {} in term {}", domainOrIp, port, request.getLeaderId(), request.getTerm());
-        if (state.getRole().equals(Role.LEADER)) {
-            // reset and re-election
-            RaftState.updateState(() -> {
-                state.setVotedFor(-1L);
-                state.setLeaderNodeId(-1L); //reset leader, re-election
-                state.setRole(Role.FOLLOWER);
-                state.setVoteStatus(VoteStatus.PROGRESS);
-            });
-            // continue to vote
-            if (electionTask == null || electionTask.isCancelled()) {
-                log.info("Node {}:{} re-election as more than one leader in term {} in the cluster.", domainOrIp, port, state.getCurrentTerm());
-                startElection();
-            }
+        log.info("Node {}:{} receive heartbeat from leader {} in term {}", 
+            domainOrIp, port, request.getLeaderId(), request.getTerm());
+        
+        if (request.getTerm() > state.getCurrentTerm()) {
+            stepDown(request.getTerm());
+        } else if (request.getTerm() < state.getCurrentTerm()) {
+            // Reject heartbeat from old term
+            responseObserver.onNext(Raft.HeartbeatResponse.newBuilder().setStatus(0).build());
+            responseObserver.onCompleted();
+            return;
+        }
+        
+        if (state.getRole().equals(Role.LEADER) && request.getLeaderId() != nodeId) {
+            // Another leader exists in the same term
+            stepDown(request.getTerm());
+            startElection();
         } else {
-            if (electionTask != null && !electionTask.isCancelled()) {
-                log.info("Node {}:{} cancel election task in term {}", domainOrIp, port, state.getCurrentTerm());
-                electionTask.cancel(false);
-            }
+            state.updateLastHeartbeat();
             RaftState.updateState(() -> {
                 state.setLeaderNodeId(request.getLeaderId());
-                state.setVoteStatus(VoteStatus.COMPLETED);
                 state.setRole(Role.FOLLOWER);
+                state.setVoteStatus(VoteStatus.COMPLETED);
             });
         }
-
-        Raft.HeartbeatResponse response = Raft.HeartbeatResponse.newBuilder()
-                .setStatus(1).build();
-        responseObserver.onNext(response);
+        
+        responseObserver.onNext(Raft.HeartbeatResponse.newBuilder().setStatus(1).build());
         responseObserver.onCompleted();
     }
 
@@ -350,7 +362,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
                 var entries = request.getEntriesList();
                 if (!entries.isEmpty()) {
                     for (Raft.LogEntry entry : entries) {
-                        state.getLog().putIfAbsent(entry.getIndex(), 
+                        state.getLogEntries().putIfAbsent(entry.getIndex(),
                             LogEntry.builder()
                                 .index(entry.getIndex())
                                 .term(entry.getTerm())

@@ -215,7 +215,7 @@ public class Blockchain {
                 // leader write the block to the local node successfully, then sync the log to other nodes
                 this.blockchainContext.getCurrentRaftServer().updateRaftState(block.getHeader().getHeight(), this.chainId);
                 // send the leader logs to other nodes
-                this.blockchainContext.getCurrentRaftServer().sendLogEntries(this.blockchainContext.getCurrentRaftServer().getState().getLog(), getDistributeNodes());
+                this.blockchainContext.getCurrentRaftServer().sendLogEntries(this.blockchainContext.getCurrentRaftServer().getState().getLogEntries(), getDistributeNodes());
             } catch (Exception e) {
                 log.error("Write Block at local node failed, rollback the block height", e);
                 // reset the cache height
