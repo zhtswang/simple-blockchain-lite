@@ -16,7 +16,7 @@ public class RaftConfig {
     private int rpcTimeout = 1000;         // milliseconds
     private int maxBatchSize = 100;        // maximum entries to send in one AppendEntries
     private int snapshotThreshold = 10000; // entries before creating snapshot
-    private boolean enablePipelining = true;
+    private boolean enablePipelining = false;
     
     public int getRandomElectionTimeout() {
         return electionTimeoutMin + (int)(Math.random() * (electionTimeoutMax - electionTimeoutMin));

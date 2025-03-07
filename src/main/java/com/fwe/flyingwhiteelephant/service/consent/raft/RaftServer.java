@@ -108,10 +108,6 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
             state.setVotedFor(nodeId);
             state.setLastLogHeight(currentHeight);
             state.updateLastHeartbeat(); // Reset heartbeat timer
-            
-            log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}, block height {}, timeout {}ms", 
-                domainOrIp, port, state.getCurrentTerm(), state.getVotedFor(),
-                state.getRole(), currentHeight, electionTimeout);
             state.setRole(Role.CANDIDATE);
         });
 
@@ -137,7 +133,9 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
             // Wait for all votes or timeout
             boolean votingFinished = votingComplete.await(electionTimeout, TimeUnit.MILLISECONDS);
             if (!votingFinished) {
-                log.warn("Election voting timed out after {}ms", electionTimeout);
+                log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}, block height {}, timeout {}ms",
+                        domainOrIp, port, state.getCurrentTerm(), state.getVotedFor(),
+                        state.getRole(), currentHeight, electionTimeout);
                 return;
             }
             
@@ -171,12 +169,14 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         }
         
         // Schedule heartbeat task
-        electionTask = executorService.scheduleAtFixedRate(
-            this::sendHeartbeats,
-            0,
-            context.getRaftConfig().getHeartbeatInterval(),
-            TimeUnit.MILLISECONDS
-        );
+        if (context.getRaftConfig().isEnablePipelining()) {
+            executorService.scheduleAtFixedRate(
+                    this::sendHeartbeats,
+                    0,
+                    context.getRaftConfig().getHeartbeatInterval(),
+                    TimeUnit.MILLISECONDS
+            );
+        }
     }
 
     private void sendHeartbeats() {
@@ -310,8 +310,8 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
 
     @Override
     public void handleHeartbeat(Raft.HeartbeatRequest request, StreamObserver<Raft.HeartbeatResponse> responseObserver) {
-        log.info("Node {}:{} receive heartbeat from leader {} in term {}", 
-            domainOrIp, port, request.getLeaderId(), request.getTerm());
+        log.info("Node {}:{} receive heartbeat from leader {} in term {}, height: {}",
+            domainOrIp, port, request.getLeaderId(), request.getTerm(), state.getLastLogHeight());
         
         if (request.getTerm() > state.getCurrentTerm()) {
             stepDown(request.getTerm());
