@@ -75,6 +75,10 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         // implement the logic
         // ThreadLocalRandom.current().nextInt(100, 100 * 2 + 1)
         CountDownLatch latch = new CountDownLatch(1);
+        Long currentHeight = context.getBlockchainSupport().getLatestHeight();
+        RaftState.updateState(() -> {
+            state.setLastLogHeight(currentHeight);
+        });
         electionTask = executorService.scheduleAtFixedRate(
                 () -> {
                     if (!state.getRole().equals(Role.LEADER) && !state.getVoteStatus().equals(VoteStatus.COMPLETED)) {
@@ -95,9 +99,6 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
 
     // 开始选举
     private void electLeader() {
-        // Update current block height before election
-        Long currentHeight = context.getBlockchainSupport().getLatestHeight();
-        
         // Reset election timeout with randomization
         int electionTimeout = context.getRaftConfig().getRandomElectionTimeout();
         
@@ -106,7 +107,6 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
             state.setCurrentTerm(state.getCurrentTerm() + 1);
             state.setVoteStatus(VoteStatus.PROGRESS);
             state.setVotedFor(nodeId);
-            state.setLastLogHeight(currentHeight);
             state.updateLastHeartbeat(); // Reset heartbeat timer
             state.setRole(Role.CANDIDATE);
         });
@@ -135,7 +135,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
             if (!votingFinished) {
                 log.info("Node {}:{} start election, term {}, voted for node:{}, current role {}, block height {}, timeout {}ms",
                         domainOrIp, port, state.getCurrentTerm(), state.getVotedFor(),
-                        state.getRole(), currentHeight, electionTimeout);
+                        state.getRole(), state.getLastLogHeight(), electionTimeout);
                 return;
             }
             
