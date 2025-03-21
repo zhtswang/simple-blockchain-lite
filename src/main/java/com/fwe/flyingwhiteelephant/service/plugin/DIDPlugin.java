@@ -43,7 +43,7 @@ public class DIDPlugin implements IPlugin {
         log.info("Creating new DID document");
         
         // Generate new DID
-        String did = DID_PREFIX + UUID.randomUUID().toString();
+        String did = DID_PREFIX + UUID.randomUUID();
         
         // Create DID Document
         Map<String, Object> didDocument = new HashMap<>();
@@ -53,17 +53,22 @@ public class DIDPlugin implements IPlugin {
         didDocument.put("status", "active");
         
         // Add controller if specified
-        if (ccRequest.getParams().containsKey("controller")) {
-            didDocument.put("controller", ccRequest.getParams().get("controller"));
+        // Create DID document, the parameter key is "DIDDocument
+        String didDocumentStr = ccRequest.getParams().get("DIDDocument");
+        // convert the string to map
+        @SuppressWarnings("unchecked")
+        Map<String, Object> didDocumentMap = objectMapper.readValue(didDocumentStr, Map.class);
+        if (didDocumentMap.containsKey("controller")) {
+            didDocument.put("controller", didDocumentMap.get("controller"));
         }
         
         // Add verification method if specified
-        if (ccRequest.getParams().containsKey("publicKey")) {
+        if (didDocumentMap.containsKey("publicKey")) {
             Map<String, Object> verificationMethod = new HashMap<>();
             verificationMethod.put("id", did + "#key-1");
             verificationMethod.put("type", "Ed25519VerificationKey2020");
             verificationMethod.put("controller", did);
-            verificationMethod.put("publicKeyBase58", ccRequest.getParams().get("publicKey"));
+            verificationMethod.put("publicKeyBase58", didDocumentMap.get("publicKey"));
             didDocument.put("verificationMethod", verificationMethod);
         }
         

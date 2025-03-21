@@ -21,7 +21,6 @@ import java.util.Map;
 
 @Slf4j
 public class PluginServer extends CallGrpc.CallImplBase {
-
     private final Map<String, IPlugin> plugins = new HashMap<>();
     public PluginServer(int port) {
         // start the rpc server and enable tls
@@ -51,9 +50,15 @@ public class PluginServer extends CallGrpc.CallImplBase {
         }
     }
 
-    public void loadPlugins(String pluginName) {
+    public void loadSystemPlugins() {
+        // load the system plugins
+        plugins.put(PluginEnum.DID.name(), new DIDPlugin());
+        plugins.put(PluginEnum.DEFAULT.name(), new DefaultPlugin());
+    }
+
+    public void loadExternalPlugins(String pluginName, IPlugin plugin) {
         // load the plugin
-        plugins.put(pluginName, new DefaultPlugin());
+        plugins.put(pluginName, plugin);
     }
 
     @Override

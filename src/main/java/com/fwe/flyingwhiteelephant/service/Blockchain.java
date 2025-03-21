@@ -9,6 +9,7 @@ import java.util.concurrent.*;
 
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftClient;
 import com.fwe.flyingwhiteelephant.service.consent.raft.RaftServer;
+import com.fwe.flyingwhiteelephant.service.crypto.Identity;
 import com.fwe.flyingwhiteelephant.service.plugin.PluginServer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -99,7 +100,7 @@ public class Blockchain {
     }
 
     public void startPluginServer() {
-        this.blockchainContext.getPluginServer().loadPlugins("default");
+        this.blockchainContext.getPluginServer().loadSystemPlugins();
     }
 
     private void startRaftElection() {
@@ -156,7 +157,15 @@ public class Blockchain {
 
     public Map<String, Map<String, String>> enroll(String username) {
         // enroll the user
-        return Map.of(username, blockchainContext.getWallet().newClientIdentity().toMap());
+        Identity identity = blockchainContext.getWallet().newClientIdentity();
+        // onchain the identity by constructing the transaction and forward to the leader node
+        Transaction tx = new Transaction();
+        tx.setPayload(TransactionPayload.builder()
+                        .smartContract("did")
+                        .args(List.of("create", "DIDDocument", identity.toJson()))
+                .build());
+        var result = broadcast(tx);
+        return Map.of(username, blockchainContext.getWallet().newClientIdentity().toMap(), "onchainResponse", result);
     }
 
     private void transactionPoolListener(TransactionPool transactionPool) {
