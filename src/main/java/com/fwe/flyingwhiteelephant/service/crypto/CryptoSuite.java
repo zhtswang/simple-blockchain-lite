@@ -30,6 +30,8 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Base64;
 import java.util.Date;
 import java.util.Map;
+import java.util.UUID;
+
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 
 
@@ -169,7 +171,7 @@ public class CryptoSuite implements ICryptoSuite, InitializingBean {
         // save the key pair private key to one hex string
         X509Certificate certificate = generateCertificate("CN=Client", keyPair,
                 this.walletBundle.get(IdentityType.NODE).getCertificate(),  this.walletBundle.get(IdentityType.NODE).getPrivateKey(), BigInteger.valueOf(System.currentTimeMillis()));
-        return new Identity(certificate, keyPair.getPrivate());
+        return new Identity(certificate, keyPair.getPrivate(), "did:fwe:client"+ UUID.randomUUID());
     }
 
     @SneakyThrows

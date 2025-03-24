@@ -162,10 +162,10 @@ public class Blockchain {
         Transaction tx = new Transaction();
         tx.setPayload(TransactionPayload.builder()
                         .smartContract("did")
-                        .args(List.of("create", "DIDDocument", identity.toJson()))
+                        .args(List.of("create", identity.getDid(), identity.toJson()))
                 .build());
-        var result = broadcast(tx);
-        return Map.of(username, blockchainContext.getWallet().newClientIdentity().toMap(), "onchainResponse", result);
+        Map<String, String> result = broadcast(tx);
+        return Map.of(username, identity.toMap(), "onchainResponse", result);
     }
 
     private void transactionPoolListener(TransactionPool transactionPool) {

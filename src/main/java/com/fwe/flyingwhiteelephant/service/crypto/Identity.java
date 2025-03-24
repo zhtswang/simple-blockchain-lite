@@ -11,11 +11,21 @@ import java.util.Map;
 
 @Getter
 @Setter
-@AllArgsConstructor
 public class Identity {
+    private String did;
     private X509Certificate certificate;
     private PrivateKey privateKey;
     private static final String SHA_256_WITH_ECDSA = "SHA256withECDSA";
+
+    public Identity(X509Certificate certificate, PrivateKey privateKey) {
+        this.certificate = certificate;
+        this.privateKey = privateKey;
+    }
+
+    public Identity(X509Certificate certificate, PrivateKey privateKey,String did) {
+        this(certificate, privateKey);
+        this.did = did;
+    }
 
     @SneakyThrows
     public String sign(String data) {
@@ -42,12 +52,17 @@ public class Identity {
     @SneakyThrows
     public String toJson() {
         // include certificate and private key
-        return "{\"certificate\":\"" + Base64.getEncoder().encodeToString(certificate.getEncoded()) + "\",\"privateKey\":\"" + Base64.getEncoder().encodeToString(privateKey.getEncoded()) + "\"}";
+        return "{\"certificate\":\"" + Base64.getEncoder().encodeToString(certificate.getEncoded())
+                + "\",\"privateKey\":\"" + Base64.getEncoder().encodeToString(privateKey.getEncoded())
+                + "\",\"did\":\"" + did
+                + "\"}";
     }
 
     @SneakyThrows
     public Map<String, String> toMap() {
-        return Map.of("certificate", Base64.getEncoder().encodeToString(certificate.getEncoded()), "privateKey", Base64.getEncoder().encodeToString(privateKey.getEncoded()));
+        return Map.of("certificate", Base64.getEncoder().encodeToString(certificate.getEncoded()),
+                "privateKey", Base64.getEncoder().encodeToString(privateKey.getEncoded()),
+                "did", did);
     }
 
 }

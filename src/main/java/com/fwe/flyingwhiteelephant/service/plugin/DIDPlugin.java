@@ -9,10 +9,12 @@ import com.fwe.flyingwhiteelephant.spi.CCResponse;
 import com.fwe.flyingwhiteelephant.spi.IPlugin;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.swing.text.html.Option;
 import java.lang.reflect.InvocationTargetException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -54,7 +56,11 @@ public class DIDPlugin implements IPlugin {
         
         // Add controller if specified
         // Create DID document, the parameter key is "DIDDocument
-        String didDocumentStr = ccRequest.getParams().get("DIDDocument");
+        // find the key value which key is start with DID_PREFIX
+        Optional<Map.Entry<String, String>> didDocOptional = ccRequest.getParams().entrySet()
+                .stream().filter(e -> e.getKey().startsWith(DID_PREFIX))
+                .findFirst();
+        String didDocumentStr = didDocOptional.map(Map.Entry::getValue).orElse(null);
         // convert the string to map
         @SuppressWarnings("unchecked")
         Map<String, Object> didDocumentMap = objectMapper.readValue(didDocumentStr, Map.class);
