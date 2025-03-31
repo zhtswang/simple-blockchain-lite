@@ -21,7 +21,12 @@ import java.util.Map;
 
 @Slf4j
 public class PluginServer extends CallGrpc.CallImplBase {
-    private final Map<String, IPlugin> plugins = new HashMap<>();
+    private static final Map<String, IPlugin> plugins = new HashMap<>();
+    // system plugin registration as static code block before the constructor
+    static {
+        plugins.put(PluginEnum.DID.getName(), new DIDPlugin());
+        plugins.put(PluginEnum.DEFAULT.getName(), new DefaultPlugin());
+    }
     public PluginServer(int port) {
         // start the rpc server and enable tls
         log.info("Starting plugin server on port: {}", port);
@@ -50,12 +55,6 @@ public class PluginServer extends CallGrpc.CallImplBase {
         }
     }
 
-    public void loadSystemPlugins() {
-        // load the system plugins
-        plugins.put(PluginEnum.DID.name(), new DIDPlugin());
-        plugins.put(PluginEnum.DEFAULT.name(), new DefaultPlugin());
-    }
-
     public void loadExternalPlugins(String pluginName, IPlugin plugin) {
         // load the plugin
         plugins.put(pluginName, plugin);
@@ -64,6 +63,7 @@ public class PluginServer extends CallGrpc.CallImplBase {
     @Override
     public void execute(Plugin.CCRequest request, StreamObserver<Plugin.CCResponse> responseObserver) {
         // get the plugin
+        log.info("Received request for plugin: {}", request.getPluginName());
         IPlugin plugin = plugins.getOrDefault(request.getPluginName(), new DefaultPlugin());
         CCRequest ccRequest = new CCRequest();
         ccRequest.setPluginName(request.getPluginName());

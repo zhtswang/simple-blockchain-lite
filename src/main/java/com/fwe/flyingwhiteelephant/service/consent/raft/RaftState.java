@@ -62,6 +62,9 @@ public class RaftState {
     @Getter
     @Setter
     private ConcurrentMap<Long, Long> matchIndex;
+    @Setter
+    @Getter
+    private long latestBlockHeight;
 
     public RaftState() {
         this.role = Role.FOLLOWER;
@@ -101,7 +104,7 @@ public class RaftState {
         this.leaderListener = leaderListener;
     }
 
-    public void setLeaderNodeId(Long leaderNodeId) {
+    public CompletableFuture<Void> setLeaderNodeId(Long leaderNodeId) {
         Long oldLeaderId = this.leaderNodeId;
         this.leaderNodeId = leaderNodeId;
         // Only trigger listener if:
@@ -109,8 +112,9 @@ public class RaftState {
         // 2. New leader is valid (not -1)
         // 3. This is actually a change in leadership
         if (leaderListener != null && leaderNodeId != -1 && !leaderNodeId.equals(oldLeaderId)) {
-            CompletableFuture.runAsync(leaderListener);
+            return CompletableFuture.runAsync(leaderListener);
         }
+        return CompletableFuture.completedFuture(null);
     }
 
     public void resetLeaderState(List<Long> peerIds) {
@@ -164,4 +168,5 @@ public class RaftState {
     public boolean hasHeartbeatTimedOut(long timeoutMs) {
         return System.currentTimeMillis() - lastHeartbeat > timeoutMs;
     }
+
 }

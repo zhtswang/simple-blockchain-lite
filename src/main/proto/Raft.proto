@@ -38,6 +38,7 @@ message AppendEntriesResponse {
 message HeartbeatRequest {
   uint32 term = 1;
   int64 leaderId = 2;
+  int64 latestBlockHeight = 3;
 }
 
 message HeartbeatResponse {

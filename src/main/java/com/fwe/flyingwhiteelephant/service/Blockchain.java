@@ -70,8 +70,6 @@ public class Blockchain {
         startNodeServer();
         // start the raft server
         startRaftElection();
-        // plugin server start load plugins
-        startPluginServer();
         // start the block consumer
         startBlockConsumer();
         // read the current block height
@@ -97,10 +95,6 @@ public class Blockchain {
     private void startNodeServer() {
         // start the node server
         this.blockchainContext.getNodeServer().start();
-    }
-
-    public void startPluginServer() {
-        this.blockchainContext.getPluginServer().loadSystemPlugins();
     }
 
     private void startRaftElection() {
@@ -241,5 +235,10 @@ public class Blockchain {
     private List<Node> getDistributeNodes() {
         // exclude node itself
         return this.blockchainContext.getNodeConfig().getNodes().stream().filter(node -> !node.getId().equals(this.nodeId)).toList();
+    }
+
+    public String getIdentity(String did) {
+        // get the identity by DID
+        return this.blockchainContext.getBlockchainSupport().getStorageService().readState(did);
     }
 }

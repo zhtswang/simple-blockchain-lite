@@ -31,4 +31,9 @@ public class BlockchainController {
     public ResponseEntity<?> enroll(@RequestBody Map<String, String> userMap) {
         return new ResponseEntity<>(blockchain.enroll(userMap.get("userName")), HttpStatus.OK);
     }
+    // get user identity by DID
+    @GetMapping(value = "/user/identity/{did}")
+    public ResponseEntity<?> getIdentity(@PathVariable String did) {
+        return new ResponseEntity<>(blockchain.getIdentity(did), HttpStatus.OK);
+    }
 }

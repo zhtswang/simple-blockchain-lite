@@ -78,6 +78,7 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         Long currentHeight = context.getBlockchainSupport().getLatestHeight();
         RaftState.updateState(() -> {
             state.setLastLogHeight(currentHeight);
+            state.setLatestBlockHeight(currentHeight);
         });
         electionTask = executorService.scheduleAtFixedRate(
                 () -> {
@@ -310,9 +311,12 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
 
     @Override
     public void handleHeartbeat(Raft.HeartbeatRequest request, StreamObserver<Raft.HeartbeatResponse> responseObserver) {
-        log.info("Node {}:{} receive heartbeat from leader {} in term {}, height: {}",
-            domainOrIp, port, request.getLeaderId(), request.getTerm(), state.getLastLogHeight());
-        
+        // block heartbeat log from leader if the block height is not the same
+        if (request.getLatestBlockHeight() != state.getLatestBlockHeight()) {
+            log.info("Node {}:{} receive heartbeat from leader {} in term {}, height: {}",
+                    domainOrIp, port, request.getLeaderId(), request.getTerm(), state.getLastLogHeight());
+        }
+
         if (request.getTerm() > state.getCurrentTerm()) {
             stepDown(request.getTerm());
         } else if (request.getTerm() < state.getCurrentTerm()) {
@@ -329,7 +333,11 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
         } else {
             state.updateLastHeartbeat();
             RaftState.updateState(() -> {
-                state.setLeaderNodeId(request.getLeaderId());
+                CompletableFuture<Void> setLeaderRes = state.setLeaderNodeId(request.getLeaderId());
+                setLeaderRes.completeAsync(() -> {
+                    state.setLatestBlockHeight(request.getLatestBlockHeight());
+                    return null;
+                });
                 state.setRole(Role.FOLLOWER);
                 state.setVoteStatus(VoteStatus.COMPLETED);
             });
@@ -342,6 +350,8 @@ public class RaftServer extends ConsentGrpc.ConsentImplBase {
     @Override
     public void handleAppendEntries(Raft.AppendEntriesRequest request, 
                                   StreamObserver<Raft.AppendEntriesResponse> responseObserver) {
+        log.info("Node {}:{} receive AppendEntries from leader {} in term {}, entries: {}",
+            domainOrIp, port, request.getLeaderId(), request.getTerm(), request.getEntriesCount());
         int status = 0;
         try {
             // Update term if needed

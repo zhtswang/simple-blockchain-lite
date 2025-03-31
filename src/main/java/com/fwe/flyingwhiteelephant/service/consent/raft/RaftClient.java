@@ -52,6 +52,7 @@ public class RaftClient {
         return channelTemplate((stub) -> {
             Raft.HeartbeatRequest.Builder requestBuilder = Raft.HeartbeatRequest.newBuilder()
                     .setTerm(state.getCurrentTerm())
+                    .setLatestBlockHeight(state.getLatestBlockHeight())
                     .setLeaderId(state.getLeaderNodeId());
 
             // If we have entries to send, convert them to AppendEntries instead
